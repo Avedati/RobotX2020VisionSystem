@@ -33,6 +33,18 @@ class Vector2 {
 	}
 }
 
+class VisionObject {
+	public Mat rvec;
+	public Mat tvec;
+	public int index;
+
+	public VisionObject(int index, Mat rvec, Mat tvec) {
+		this.index = index;
+		this.rvec = rvec;
+		this.tvec = tvec;
+	}
+}
+
 public class Test {
 
 	public static final String TITLE = "Test";
@@ -236,7 +248,8 @@ public class Test {
 		videoCapture.set(Videoio.CAP_PROP_FRAME_HEIGHT, HEIGHT);
 		Mat mat = new Mat();
 
-		List<MatOfPoint> savedHexagons = new ArrayList<MatOfPoint>();
+		List<Mat> savedHexagons = new ArrayList<Mat>();
+		List<Mat> frames = new ArrayList<Mat>();
 
 		while(true) {
 			if(videoCapture.isOpened()) {
@@ -307,7 +320,7 @@ public class Test {
 					for(int i=0;i<octagons.size();i++) { octagonsToDraw.add(octagons.get(i).getValue()); }
 
 					if(Test.nFrames % 100 == 0) {
-						savedHexagons.add(hexagonsToDraw.get(0));
+						savedHexagons.add(new MatOfPoint2f(hexagonsToDraw.get(0).toArray()));
 					}
 
 					for(int i=0;i<Math.min(1, hexagonsToDraw.size());i++) {
@@ -320,6 +333,10 @@ public class Test {
 						Imgproc.drawContours(mat, octagonsToDraw, i, new Scalar(0, 0, 255), 1);
 					}
 
+					if(Test.nFrames % 100 == 0) {
+						frames.add(mat.clone());
+					}
+
 					panel.setImage(Test.bufferedImage(mat));
 					panel.repaint();
 					if(Test.nFrames >= 1000) { break; }
@@ -329,23 +346,60 @@ public class Test {
 			break;
 		}
 
-		/*List<MatOfPoint> objectPoints = new ArrayList<MatOfPoint>();
-		List<Point> pts = new ArrayList<Point>();
+		List<Mat> objectPoints = new ArrayList<Mat>();
+		List<org.opencv.core.Point3> pts = new ArrayList<org.opencv.core.Point3>();
 		// TODO: this
-		for(double theta=0;theta<Math.PI*2;theta+=Math.PI/3) {
-			pts.add(new Point(15 * Math.cos(theta), 15 * Math.cos(theta)));
+		double theta=Math.PI*4/3;
+		for(int i=0; i<6; ++i) {
+			pts.add(new org.opencv.core.Point3(15 * Math.cos(theta), 15 * Math.sin(theta), 0));
+			theta+=Math.PI/3;
+			//theta<Math.PI*10/3;theta+=Math.PI/3) {
 		}
 		for(int i=0;i<10;i++) {
-			MatOfPoint mpt = new MatOfPoint();
+			MatOfPoint3f mpt = new MatOfPoint3f();
 			mpt.fromList(pts);
 			objectPoints.add(mpt);
 		}
+
+		List<VisionObject> visionObjects = new ArrayList<VisionObject>();
 
 		Mat cameraMatrix = new Mat();
 		Mat distCoeffs = new Mat();
 		List<Mat> rvecs = new ArrayList<>();
 		List<Mat> tvecs = new ArrayList<>();
-		Calib3d.calibrateCamera(objectPoints, savedHexagons, new Size(WIDTH, HEIGHT), cameraMatrix, distCoeffs, rvecs, tvecs);*/
+		Calib3d.calibrateCamera(objectPoints, savedHexagons, new Size(WIDTH, HEIGHT), cameraMatrix, distCoeffs, rvecs, tvecs);
+
+		for(int i=0;i<10;i++) {
+			visionObjects.add(new VisionObject(i * 100, rvecs.get(i), tvecs.get(i)));
+		}
+
+		Test.nFrames = 0;
+		int imageIndex = 0;
+		while(true) {
+			Test.nFrames++;
+			if(Test.nFrames % 5000 == 0) { imageIndex++; }
+			if(Test.nFrames >= 50000) { break; }
+			Mat img = frames.get(imageIndex);
+			MatOfPoint2f dMat = new MatOfPoint2f();
+
+			Calib3d.projectPoints(
+				new MatOfPoint3f(objectPoints.get(imageIndex)),
+				rvecs.get(imageIndex),
+				tvecs.get(imageIndex),
+				cameraMatrix,
+				new MatOfDouble(distCoeffs),
+				dMat
+			);
+
+			List<MatOfPoint> draw = new ArrayList<MatOfPoint>();
+			MatOfPoint temp = new MatOfPoint();
+			dMat.convertTo(temp, CvType.CV_32S);
+			draw.add(temp);
+			Imgproc.drawContours(img, draw, 0, new Scalar(0, 0, 255), 4);
+			// TODO: this
+			panel.setImage(Test.bufferedImage(frames.get(imageIndex)));
+			panel.repaint();
+		}
 	}
 }
 
