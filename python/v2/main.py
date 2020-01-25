@@ -44,7 +44,7 @@ def processHexagon(polygon):
 		p2 = result2[(i+1)%len(result2)]
 		distances.append(dist(p1[0], p1[1], p2[0], p2[1]))
 	distances.sort();
-	return [distances[0], np.array(result2)]
+	return [distances[0], np.squeeze(result2)]
 
 def processOctagon(polygon):
 	polygon = np.squeeze(polygon)
@@ -73,7 +73,7 @@ def processOctagon(polygon):
 		p2 = result2[(i+1)%len(result2)]
 		distances.append(dist(p1[0], p1[1], p2[0], p2[1]))
 	distances.sort();
-	return [distances[0], np.array(result2)]
+	return [distances[0], np.squeeze(result2)]
 
 def polygonTests(polygon):
 	polygon = np.squeeze(polygon)
@@ -133,7 +133,6 @@ def main():
 				cnt = contours[i]
 				epsilon = 0.005*cv2.arcLength(cnt, True)
 				polygon = cv2.approxPolyDP(cnt, epsilon, True)
-				hexagons.append(polygon)
 				result = polygonTests(polygon)
 				if result == -1:
 					continue
@@ -148,7 +147,7 @@ def main():
 						if not cv2.isContourConvex(octagonPair[1]):
 							continue
 						octagons.append(octagonPair)
-			
+
 			hexagons.sort(key=lambda h: h[0])
 			octagons.sort(key=lambda o: o[0])
 			
@@ -162,7 +161,7 @@ def main():
 			for i in range(min(1, len(hexagonsToDraw))):
 				cv2.drawContours(frame, hexagonsToDraw, i, (0, 255, 0), 1)
 				for j in range(len(hexagonsToDraw[i])):
-					cv2.putText(frame, str(j+1), hexagonsToDraw[i][j], cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0))
+					cv2.putText(frame, str(j+1), tuple(hexagonsToDraw[i][j]), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0))
 			for i in range(min(1, len(octagonsToDraw))):
 				cv2.drawContours(frame, octagonsToDraw, i, (0, 0, 255), 1)
 			cv2.imshow('test', frame)
