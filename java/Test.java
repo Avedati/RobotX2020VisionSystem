@@ -91,7 +91,7 @@ class PolygonTracker {
 	public TestPanel panel;
 
 	public PolygonTracker() {
-		vc = new VideoCapture("/Users/spiderfencer/Desktop/opencv-test-video.mov");
+		vc = new VideoCapture(1);
 
 		jframe = new JFrame(PolygonTracker.TITLE);
 		jframe.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
@@ -387,13 +387,13 @@ class PolygonTracker {
 		for(int i=0;i<octagons.size();i++) { octagonsToDraw.add(octagons.get(i).getValue()); }
 
 		for(int i=0;i<Math.min(1, hexagonsToDraw.size());i++) {
-			Imgproc.drawContours(mat, hexagonsToDraw, i, new Scalar(0, 255, 0), 1);
+			//Imgproc.drawContours(mat, hexagonsToDraw, i, new Scalar(0, 255, 0), 1);
 			for(int j=0;j<hexagonsToDraw.get(i).toList().size();j++) {
-				Imgproc.putText(mat, Integer.toString(j+1), hexagonsToDraw.get(i).toList().get(j), Imgproc.FONT_HERSHEY_SIMPLEX, 1, new Scalar(0, 255, 0));
+				//Imgproc.putText(mat, Integer.toString(j+1), hexagonsToDraw.get(i).toList().get(j), Imgproc.FONT_HERSHEY_SIMPLEX, 1, new Scalar(0, 255, 0));
 			}
 		}
 		for(int i=0;i<Math.min(1, octagonsToDraw.size());i++) {
-			Imgproc.drawContours(mat, octagonsToDraw, i, new Scalar(0, 0, 255), 1);
+			//Imgproc.drawContours(mat, octagonsToDraw, i, new Scalar(0, 0, 255), 1);
 		}
 
 		currHexagons = hexagonsToDraw;
@@ -610,35 +610,14 @@ public class Test {
 			if (nFrames > 400 && nFrames % 100 == 0) {
 				savedHexagons.add(new MatOfPoint2f(hexagons.get(0).toArray()));
 				frames.add(mat.clone());
-				Imgproc.putText(mat, "Calibrating!!!!!!!!!!!!!!!!!!", new org.opencv.core.Point(100, 100), Imgproc.FONT_HERSHEY_SIMPLEX, 1, new Scalar(0, 127, 255), 10);
+				//Imgproc.putText(mat, "Calibrating!!!!!!!!!!!!!!!!!!", new org.opencv.core.Point(100, 100), Imgproc.FONT_HERSHEY_SIMPLEX, 1, new Scalar(0, 127, 255), 10);
 				tracker.panel.setImage(tracker.bufferedImage(mat));
 				tracker.panel.repaint();
 			}
-			if (nFrames > 1100) {
+			/*if (nFrames > 1100) {
 				break;
-			}
+			}*/
 		}
-
-		/*List<Mat> objectPoints = new ArrayList<Mat>();
-		List<org.opencv.core.Point3> pts = new ArrayList<org.opencv.core.Point3>();
-		/*double theta=Math.PI*4/3;
-		for(int i=0; i<6; ++i) {
-			pts.add(new org.opencv.core.Point3(15 * Math.cos(theta), 15 * Math.sin(theta), 0));
-			theta+=Math.PI/3;
-			//theta<Math.PI*10/3;theta+=Math.PI/3) {
-		}
-		pts.add(new org.opencv.core.Point3(-1,-2.2,0));
-		pts.add(new org.opencv.core.Point3(-2.1,0,0));
-		pts.add(new org.opencv.core.Point3(-1,2.4,0));
-		pts.add(new org.opencv.core.Point3(1.1,2.7,0));
-		pts.add(new org.opencv.core.Point3(2.6,0.8,0));
-		pts.add(new org.opencv.core.Point3(1.4,-1.8,0));
-
-		for(int i=0;i<10;i++) {
-			MatOfPoint3f mpt = new MatOfPoint3f();
-			mpt.fromList(pts);
-			objectPoints.add(mpt);
-		}*/
 
 		HexagonObject hexagonObject = new HexagonObject();
 
@@ -653,158 +632,11 @@ public class Test {
   }
 
 	public static void main(String[] args) {
-		/*JFrame jframe = new JFrame(PolygonTracker.TITLE);
-		jframe.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
-		jframe.setSize(PolygonTracker.WIDTH, PolygonTracker.HEIGHT);
-
-		TestPanel panel = new TestPanel();
-		jframe.add(panel);
-		jframe.setVisible(true);*/
 
 		System.loadLibrary(Core.NATIVE_LIBRARY_NAME);
-		/*VideoCapture videoCapture = new VideoCapture("/Users/spiderfencer/Desktop/opencv-test-video.mov");
-		videoCapture.set(Videoio.CAP_PROP_FRAME_WIDTH, PolygonTracker.WIDTH);
-		videoCapture.set(Videoio.CAP_PROP_FRAME_HEIGHT, PolygonTracker.HEIGHT);*/
-
-		/*
-		List<Mat> savedHexagons = new ArrayList<Mat>();
-		List<Mat> frames = new ArrayList<Mat>();
-
-		while(true) {
-			if(videoCapture.isOpened()) {
-				if(videoCapture.read(mat)) {
-					Test.nFrames++;
-					List<MatOfPoint> contours = new ArrayList<MatOfPoint>();
-					Mat gray = new Mat();
-					Mat gaussian = new Mat();
-					Mat canny = new Mat();
-					// https://www.programcreek.com/java-api-examples/?class=org.opencv.imgproc.Imgproc&method=HoughLinesP
-					Imgproc.resize(mat, mat, new Size(WIDTH, HEIGHT), 0, 0); 
-					Imgproc.cvtColor(mat, gray, Imgproc.COLOR_BGR2GRAY);
-					Imgproc.GaussianBlur(gray, gaussian, new Size(GAUSSIAN_BLUR_KERNEL_SIZE, GAUSSIAN_BLUR_KERNEL_SIZE), GAUSSIAN_X_STDDEV);
-					Imgproc.Canny(gaussian, canny, 10, 160);
-					Mat element = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, new Size(3, 3));
-					Imgproc.dilate(canny, canny, element);
-					Imgproc.erode(canny, canny, element);
-					Imgproc.findContours(canny, contours, new Mat(), Imgproc.RETR_TREE, Imgproc.CHAIN_APPROX_NONE);
-
-					// https://www.programcreek.com/java-api-examples/?class=org.opencv.imgproc.Imgproc&method=arcLength
-					Iterator<MatOfPoint> iterator = contours.iterator();
-					List<Pair<Double, MatOfPoint>> hexagons = new ArrayList<Pair<Double, MatOfPoint>>();
-					List<Pair<Double, MatOfPoint>> octagons = new ArrayList<Pair<Double, MatOfPoint>>();
-
-					MatOfPoint largestHexagon = null;
-					double largestHexagonArea = -1;
-
-					while(iterator.hasNext()) {
-						MatOfPoint contour = iterator.next();
-						double epsilon = 0.005*Imgproc.arcLength(new MatOfPoint2f(contour.toArray()),true);
-						MatOfPoint2f polygon2f = new MatOfPoint2f();
-						Imgproc.approxPolyDP(new MatOfPoint2f(contour.toArray()),polygon2f,epsilon,true);
-						//Imgproc.approxPolyDP(polygon2f,polygon2f,0.01*Imgproc.arcLength(polygon2f,true),true);
-						// https://stackoverflow.com/questions/30134903/convert-matofpoint2f-to-matofpoint
-						MatOfPoint polygon = new MatOfPoint();
-						polygon2f.convertTo(polygon, CvType.CV_32S);
-						int result = polygonTests(polygon, false);
-						if(result == -1) { continue; }
-						else if(result == 6) {
-							Pair<Double, MatOfPoint> hexagonPair = processHexagon(polygon);
-							if(!Imgproc.isContourConvex(hexagonPair.getValue())) { continue; }
-							hexagons.add(hexagonPair);
-						}
-						else if(result == 8) {
-							Pair<Double, MatOfPoint> octagonPair = processOctagon(polygon);
-							if(octagonPair != null) {
-								if(!Imgproc.isContourConvex(octagonPair.getValue())) { continue; }
-								octagons.add(octagonPair);
-							}
-						}
-					}
-
-					Collections.sort(hexagons, new Comparator<Pair<Double, MatOfPoint>>() {
-						@Override public int compare(final Pair<Double, MatOfPoint> p1, final Pair<Double, MatOfPoint> p2) {
-							return Double.compare(p2.getKey(), p1.getKey());
-						}
-					});
-
-					Collections.sort(octagons, new Comparator<Pair<Double, MatOfPoint>>() {
-						@Override public int compare(final Pair<Double, MatOfPoint> p1, final Pair<Double, MatOfPoint> p2) {
-							return Double.compare(p2.getKey(), p1.getKey());
-						}
-					});
-
-					List<MatOfPoint> hexagonsToDraw = new ArrayList<MatOfPoint>();
-					List<MatOfPoint> octagonsToDraw = new ArrayList<MatOfPoint>();
-					for(int i=0;i<hexagons.size();i++) { hexagonsToDraw.add(hexagons.get(i).getValue()); }
-					for(int i=0;i<octagons.size();i++) { octagonsToDraw.add(octagons.get(i).getValue()); }
-
-					if(Test.nFrames % 100 == 0) {
-						savedHexagons.add(new MatOfPoint2f(hexagonsToDraw.get(0).toArray()));
-					}
-
-					for(int i=0;i<Math.min(1, hexagonsToDraw.size());i++) {
-						Imgproc.drawContours(mat, hexagonsToDraw, i, new Scalar(0, 255, 0), 1);
-						for(int j=0;j<hexagonsToDraw.get(i).toList().size();j++) {
-							Imgproc.putText(mat, Integer.toString(j+1), hexagonsToDraw.get(i).toList().get(j), Imgproc.FONT_HERSHEY_SIMPLEX, 1, new Scalar(0, 255, 0));
-						}
-					}
-					for(int i=0;i<Math.min(1, octagonsToDraw.size());i++) {
-						Imgproc.drawContours(mat, octagonsToDraw, i, new Scalar(0, 0, 255), 1);
-					}
-
-					if(Test.nFrames % 100 == 0) {
-						frames.add(mat.clone());
-					}
-
-					panel.setImage(Test.bufferedImage(mat));
-					panel.repaint();
-					if(Test.nFrames >= 1000) { break; }
-					continue;
-				}
-			}
-			break;
-		}
-		*/
-
-		/*
-		PolygonTracker tracker = new PolygonTracker();
-		Mat mat = new Mat();
-		while(tracker.TrackPolygonsInFrame(mat)) {
-			List<MatOfPoint> hexagons = tracker.getFrameHexagons();
-		}
-		*/
 		Mat cameraMatrix = new Mat();
 	  Mat distCoeffs = new Mat();
 	  ComputeCalibration(cameraMatrix, distCoeffs);
-
-		/*
-		List<Mat> objectPoints = new ArrayList<Mat>();
-		List<org.opencv.core.Point3> pts = new ArrayList<org.opencv.core.Point3>();
-		pts.add(new org.opencv.core.Point3(-1,-2.2,0));
-		pts.add(new org.opencv.core.Point3(-2.1,0,0));
-		pts.add(new org.opencv.core.Point3(-1,2.4,0));
-		pts.add(new org.opencv.core.Point3(1.1,2.7,0));
-		pts.add(new org.opencv.core.Point3(2.6,0.8,0));
-		pts.add(new org.opencv.core.Point3(1.4,-1.8,0));
-
-		for(int i=0;i<10;i++) {
-			MatOfPoint3f mpt = new MatOfPoint3f();
-			mpt.fromList(pts);
-			objectPoints.add(mpt);
-		}
-
-		List<VisionObject> visionObjects = new ArrayList<VisionObject>();
-
-		Mat cameraMatrix = new Mat();
-		Mat distCoeffs = new Mat();
-		List<Mat> rvecs = new ArrayList<>();
-		List<Mat> tvecs = new ArrayList<>();
-		Calib3d.calibrateCamera(objectPoints, savedHexagons, new Size(PolygonTracker.WIDTH, PolygonTracker.HEIGHT), cameraMatrix, distCoeffs, rvecs, tvecs);
-
-		for(int i=0;i<10;i++) {
-			visionObjects.add(new VisionObject(i * 100, rvecs.get(i), tvecs.get(i)));
-		}
-		*/
 
 		HexagonObject hexagonObject = new HexagonObject();
 		PolygonTracker tracker = new PolygonTracker();
@@ -839,42 +671,11 @@ public class Test {
 			MatOfPoint temp = new MatOfPoint();
 			dMat.convertTo(temp, CvType.CV_32S);
 			draw.add(temp);
-			Imgproc.drawContours(mat, draw, 0, new Scalar(0, 0, 255), 4);
+			//Imgproc.drawContours(mat, draw, 0, new Scalar(0, 0, 255), 4);
 
 			tracker.panel.setImage(Test.bufferedImage(mat));
 			tracker.panel.repaint();
 		}
-		
-
-		/*VideoCapture v2 = new VideoCapture("/Users/spiderfencer/Desktop/opencv-test-video.mov");
-		v2.set(Videoio.CAP_PROP_FRAME_WIDTH, PolygonTracker.WIDTH);
-		v2.set(Videoio.CAP_PROP_FRAME_HEIGHT, PolygonTracker.HEIGHT);
-		Mat mat = new Mat();
-
-		while(true) {
-			if(v2.isOpened()) {
-				if(v2.read(mat)) {
-					MatOfPoint2f dMat = new MatOfPoint2f();
-
-					Calib3d.projectPoints(
-						new MatOfPoint3f(objectPoints.get(imageIndex)),
-						rvecs.get(imageIndex),
-						tvecs.get(imageIndex),
-						cameraMatrix,
-						new MatOfDouble(distCoeffs),
-						dMat
-					);
-
-					List<MatOfPoint> draw = new ArrayList<MatOfPoint>();
-					MatOfPoint temp = new MatOfPoint();
-					dMat.convertTo(temp, CvType.CV_32S);
-					draw.add(temp);
-					Imgproc.drawContours(mat, draw, 0, new Scalar(0, 0, 255), 4);
-					panel.setImage(Test.bufferedImage(mat));
-					panel.repaint();
-				}
-			}
-		}*/
 	}
 }
 
