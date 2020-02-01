@@ -478,7 +478,7 @@ public class Test {
 	public static void writeCalibrationData(String filename, Mat cameraMatrix, Mat distCoeffs) {
 		try {
 			FileWriter fileWriter = new FileWriter(filename);
-			fileWriter.write(Integer.toString(distCoeffs.rows()) + " " + Integer.toString(cameraMatrix.cols()) + "\r\n");
+			fileWriter.write(Integer.toString(cameraMatrix.rows()) + " " + Integer.toString(cameraMatrix.cols()) + "\r\n");
 			for(int r=0;r<cameraMatrix.rows();r++) {
 				for(int c=0;c<cameraMatrix.cols();c++) {
 					for(int i=0;i<cameraMatrix.get(r, c).length;i++) {
@@ -487,7 +487,7 @@ public class Test {
 				}
 				fileWriter.write("\r\n");
 			}
-			fileWriter.write(Integer.toString(distCoeffs.rows()) + " " + Integer.toString(cameraMatrix.cols()) + "\r\n");
+			fileWriter.write(Integer.toString(distCoeffs.rows()) + " " + Integer.toString(distCoeffs.cols()) + "\r\n");
 			for(int r=0;r<distCoeffs.rows();r++) {
 				for(int c=0;c<distCoeffs.cols();c++) {
 					for(int i=0;i<distCoeffs.get(r, c).length;i++) {
@@ -507,13 +507,20 @@ public class Test {
 			BufferedReader bufferedReader = new BufferedReader(new FileReader(filename));
 			String line;
 			int currentRow = -1;
-			int maxRows = 0;
+			int maxRows = 0, maxCols = 0;
 			boolean usingCameraMatrix = true;
 			while((line = bufferedReader.readLine()) != null) {
 				if(currentRow == -1) {
 					String[] parts = line.split(" ", -1);
-					maxRows = Integer.parseInt(parts[1]);
+					maxRows = Integer.parseInt(parts[0]);
+					maxCols = Integer.parseInt(parts[1]);
 					currentRow++;
+					if(usingCameraMatrix) {
+						(new Mat(new Size(maxRows, maxCols), CvType.CV_64F)).copyTo(cameraMatrix);
+					}
+					else {
+						(new Mat(new Size(maxRows, maxCols), CvType.CV_64F)).copyTo(distCoeffs);
+					}
 				}
 				else {
 					String[] parts = line.split(" ", -1);
@@ -524,10 +531,10 @@ public class Test {
 						}
 					}
 					if(usingCameraMatrix) {
-						cameraMatrix.put(0, currentRow, d);
+						cameraMatrix.put(currentRow, 0, d);
 					}
 					else {
-						distCoeffs.put(0, currentRow, d);
+						distCoeffs.put(currentRow, 0, d);
 					}
 					currentRow++;
 					if(currentRow == maxRows) { currentRow = -1; usingCameraMatrix = false; }
@@ -589,6 +596,15 @@ public class Test {
 		else {
 			ComputeCalibration(videoFilename, cameraMatrix, distCoeffs);
 		}
+
+		/*for(int r=0;r<cameraMatrix.rows();r++) {
+			for(int c=0;c<cameraMatrix.cols();c++) {
+				for(int i=0;i<cameraMatrix.get(r, c).length;i++) {
+					System.out.print(Double.toString(cameraMatrix.get(r, c)[i]) + " ");
+				}
+			}
+			System.out.println();
+		}*/
 
 		HexagonObject hexagonObject = new HexagonObject();
 		PolygonTracker tracker = new PolygonTracker(videoFilename + ".mov", 0);
