@@ -8,7 +8,6 @@ import java.awt.*;
 import java.awt.image.BufferedImage;
 import java.awt.image.DataBufferByte;
 import javax.swing.*;
-import javafx.util.Pair;
 import org.opencv.core.*;
 import org.opencv.videoio.Videoio;
 import org.opencv.videoio.VideoCapture;
@@ -16,23 +15,39 @@ import org.opencv.imgproc.Imgproc;
 import org.opencv.imgproc.Moments;
 import org.opencv.calib3d.Calib3d;
 
+class Pair<K, V> {
+
+	private K k;
+	private V v;
+
+	public Pair(K k, V v) {
+		this.k = k;
+		this.v = v;
+	}
+
+	public K getKey() { return this.k; }
+	public V getValue() { return this.v; }
+}
+
 class HexagonObject {
 
 	private MatOfPoint3f objectPoints;
 
 	public HexagonObject() {
 		List<org.opencv.core.Point3> pts = new ArrayList<org.opencv.core.Point3>();
-		double theta=Math.PI*4/3;
+		double theta=Math.PI;
 		for(int i=0; i<6; ++i) {
 			pts.add(new org.opencv.core.Point3(17.625 * Math.cos(theta), 17.625 * Math.sin(theta), 0));
 			theta+=Math.PI/3;
 		}
-		/*pts.add(new org.opencv.core.Point3(-1,-2.2,0));
+		/*
 		pts.add(new org.opencv.core.Point3(-2.1,0,0));
 		pts.add(new org.opencv.core.Point3(-1,2.4,0));
 		pts.add(new org.opencv.core.Point3(1.1,2.7,0));
 		pts.add(new org.opencv.core.Point3(2.6,0.8,0));
-		pts.add(new org.opencv.core.Point3(1.4,-1.8,0));*/
+		pts.add(new org.opencv.core.Point3(1.4,-1.8,0));
+		pts.add(new org.opencv.core.Point3(-1,-2.2,0));
+		*/
 		
 		objectPoints = new MatOfPoint3f();
 	  objectPoints.fromList(pts);
@@ -149,6 +164,9 @@ class PolygonTracker {
 		for(int i=0;i<6;i++) {
 			if(i == index) { continue; }
 			if(pts.get(i).x < pts.get(index).x) { return false; }
+		}
+		for(int i=0;i<6;i++) {
+			if(i == (index + 3) % 6) { continue; }
 			if(pts.get(i).x > pts.get((index + 3) % 6).x) { return false; }
 		}
 		for(int i=0;i<6;i++) {
@@ -161,6 +179,15 @@ class PolygonTracker {
 			if(pts.get(i).y > pts.get((index + 1) % 6).y) { return false; }
 			if(pts.get(i).y > pts.get((index + 2) % 6).y) { return false; }
 		}
+
+		List<org.opencv.core.Point> pts2f = new ArrayList<org.opencv.core.Point>();
+		for(int i=0;i<6;i++) {
+			pts2f.add(pts.get((i + index) % 6));
+		}
+		MatOfPoint2f hexagonNew = new MatOfPoint2f();
+		hexagonNew.fromList(pts2f);
+		hexagonNew.copyTo(hexagon);
+		
 		/*double x2 = hexagon.toList().get(1).x;
 		for(int i=0;i<6;i++) {
 			if(i == 1) { continue; }
@@ -247,6 +274,12 @@ class PolygonTracker {
 		Collections.sort(distances);
 		
 		return new Pair<Double, MatOfPoint2f>(distances.get(0), result3);
+	}
+
+	public static void refineCorners(Mat image, MatOfPoint2f polygon) {
+		//List<org.opencv.core.Point2f> pts = polygon.toList();
+		TermCriteria term = new TermCriteria(TermCriteria.EPS | TermCriteria.MAX_ITER, 30, 0.1);
+		Imgproc.cornerSubPix(image, polygon, new Size(11, 11), new Size(-1, -1), term);
 	}
 
 	public static Pair<Double, MatOfPoint2f> processOctagon(MatOfPoint2f polygon) {
@@ -401,6 +434,7 @@ class PolygonTracker {
 				MatOfPoint hexagonTemp = new MatOfPoint();
 				hexagonPair.getValue().convertTo(hexagonTemp, CvType.CV_32S);
 				if(!Imgproc.isContourConvex(hexagonTemp)) { continue; }
+				refineCorners(gray, hexagonPair.getValue());
 				hexagons.add(hexagonPair);
 			}
 			else if(result == 8) {
@@ -474,6 +508,13 @@ class PolygonTracker {
 public class Test {
 
 	public static int nFrames = 0;
+
+	public static void printPolygon(MatOfPoint2f polygon, String message) {
+		System.out.println(message);
+		for(int i = 0; i < polygon.toList().size(); ++i) {
+			System.out.println(polygon.toList().get(i));
+		}
+	}
 
 	public static void writeCalibrationData(String filename, Mat cameraMatrix, Mat distCoeffs) {
 		try {
@@ -558,13 +599,13 @@ public class Test {
 				continue;
 			}
 		  nFrames++;
-			if (nFrames > 400 && nFrames % 100 == 0) {
+			if(nFrames % 100 == 0) {
 				savedHexagons.add(hexagons.get(0));
 				frames.add(mat.clone());
-				//Imgproc.putText(mat, "Calibrating!!!!!!!!!!!!!!!!!!", new org.opencv.core.Point(100, 100), Imgproc.FONT_HERSHEY_SIMPLEX, 1, new Scalar(0, 127, 255), 10);
-				tracker.panel.setImage(tracker.bufferedImage(mat));
-				tracker.panel.repaint();
 			}
+			//Imgproc.putText(mat, "Calibrating!!!!!!!!!!!!!!!!!!", new org.opencv.core.Point(100, 100), Imgproc.FONT_HERSHEY_SIMPLEX, 1, new Scalar(0, 127, 255), 10);
+			//tracker.panel.setImage(tracker.bufferedImage(mat));
+			//tracker.panel.repaint();
 			/*if (nFrames > 1100) {
 				break;
 			}*/
@@ -579,6 +620,7 @@ public class Test {
 
 		List<Mat> rvecs = new ArrayList<>();
 		List<Mat> tvecs = new ArrayList<>();
+		//printPolygon(new MatOfPoint2f(new MatOfPoint(savedHexagons.get(0)).toArray()), "Before calib savedHexagons");
 		Calib3d.calibrateCamera(objectPoints, savedHexagons, new Size(PolygonTracker.WIDTH, PolygonTracker.HEIGHT), cameraMatrix, distCoeffs, rvecs, tvecs);
 		writeCalibrationData(filename + "-calib.txt", cameraMatrix, distCoeffs);
   }
@@ -621,6 +663,7 @@ public class Test {
 				continue;
 			}
 			MatOfPoint2f imagePoints = new MatOfPoint2f(hexagons.get(0).clone());
+			printPolygon(imagePoints, "Before solvePnP imagePoints");
 			Calib3d.solvePnP(hexagonObject.getObjectPoints(), imagePoints, cameraMatrix, new MatOfDouble(distCoeffs), rvec, tvec, useExtrinsicGuess);
 			useExtrinsicGuess = true;	
 			
@@ -638,7 +681,7 @@ public class Test {
 			// Draw points.
 			MatOfPoint2f dMat2 = new MatOfPoint2f();
 			Calib3d.projectPoints(
-					hexagonObject.getObjectPoints(2),
+					hexagonObject.getObjectPoints(-2),
 					rvec,
 					tvec,
 					cameraMatrix,
