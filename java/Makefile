@@ -1,9 +1,9 @@
 all:
-	javac -classpath opencv-412.jar *.java
+	javac -classpath libs/opencv-412.jar *.java
 
 clean:
 	rm -f *.class
 
 test:
 	$(MAKE) all
-	java -classpath .:opencv-412.jar -Djava.library.path=. Test
+	java -classpath .:libs/opencv-412.jar -Djava.library.path=.:libs Test

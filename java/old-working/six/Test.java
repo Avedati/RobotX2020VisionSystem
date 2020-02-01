@@ -98,8 +98,8 @@ class PolygonTracker {
 
 	private VideoCapture vc;
 	private int nFrames;
-	private List<MatOfPoint2f> currHexagons;
-	private List<MatOfPoint2f> currOctagons;
+	private List<MatOfPoint> currHexagons;
+	private List<MatOfPoint> currOctagons;
 
 	private JFrame jframe;
 	public TestPanel panel;
@@ -140,7 +140,7 @@ class PolygonTracker {
 		return Math.sqrt((p1.x - p2.x) * (p1.x - p2.x) + (p1.y - p2.y) * (p1.y - p2.y));
 	}
 
-	public static boolean hexagonTest(MatOfPoint2f hexagon) {
+	public static boolean hexagonTest(MatOfPoint hexagon) {
 		List<org.opencv.core.Point> pts = hexagon.toList();
 		int index = 0;
 		for(int i=1;i<6;i++) {
@@ -187,7 +187,7 @@ class PolygonTracker {
 		return true;
 	}
 
-	public static Pair<Double, MatOfPoint2f> processHexagon(MatOfPoint2f polygon) {
+	public static Pair<Double, MatOfPoint> processHexagon(MatOfPoint polygon) {
 		// Sort vertices by angle. Bubble up points with least colinear angles to top.
     // And only retain top 6 vertices.
 		org.opencv.core.Point p1, p2, p3;
@@ -234,7 +234,7 @@ class PolygonTracker {
 		}
 
 		// Sort all contours by max-of-shortest line length.
-		MatOfPoint2f result3 = new MatOfPoint2f();
+		MatOfPoint result3 = new MatOfPoint();
 		result3.fromList(result2);
 
 		ArrayList<Double> distances = new ArrayList<Double>();
@@ -246,10 +246,10 @@ class PolygonTracker {
 
 		Collections.sort(distances);
 		
-		return new Pair<Double, MatOfPoint2f>(distances.get(0), result3);
+		return new Pair<Double, MatOfPoint>(distances.get(0), result3);
 	}
 
-	public static Pair<Double, MatOfPoint2f> processOctagon(MatOfPoint2f polygon) {
+	public static Pair<Double, MatOfPoint> processOctagon(MatOfPoint polygon) {
 		org.opencv.core.Point p1, p2, p3;
 		Vector2 v12, v23;
 		ArrayList<Pair<Double, Integer>> pairs = new ArrayList<Pair<Double, Integer>>();
@@ -294,7 +294,7 @@ class PolygonTracker {
 			result2.add(polygon.toList().get(result.get(i)));
 		}
 
-		MatOfPoint2f result3 = new MatOfPoint2f();
+		MatOfPoint result3 = new MatOfPoint();
 		result3.fromList(result2);
 
 		ArrayList<Double> distances = new ArrayList<Double>();
@@ -306,10 +306,10 @@ class PolygonTracker {
 
 		Collections.sort(distances);
 		
-		return new Pair<Double, MatOfPoint2f>(distances.get(0), result3);
+		return new Pair<Double, MatOfPoint>(distances.get(0), result3);
 	}
 
-	public static int polygonTests(MatOfPoint2f polygon, boolean noisy) {
+	public static int polygonTests(MatOfPoint polygon, boolean noisy) {
 		double totalDistance = calculateDistance(polygon.toList().get(0), polygon.toList().get(polygon.toList().size()-1)); 
 		ArrayList<Double> distances = new ArrayList<Double>();
 		for(int i=0;i<polygon.toList().size()-1;i++) {
@@ -332,9 +332,7 @@ class PolygonTracker {
 			}
 			return false;
 		}*/
-		MatOfPoint polygonTemp = new MatOfPoint();
-		polygon.convertTo(polygonTemp, CvType.CV_32S);
-		if(!Imgproc.isContourConvex(polygonTemp)) {
+		if(!Imgproc.isContourConvex(polygon)) {
 			if(noisy) {
 				System.out.println("Failed convexity test.");
 			}
@@ -382,8 +380,8 @@ class PolygonTracker {
 
 		// https://www.programcreek.com/java-api-examples/?class=org.opencv.imgproc.Imgproc&method=arcLength
 		Iterator<MatOfPoint> iterator = contours.iterator();
-		List<Pair<Double, MatOfPoint2f>> hexagons = new ArrayList<Pair<Double, MatOfPoint2f>>();
-		List<Pair<Double, MatOfPoint2f>> octagons = new ArrayList<Pair<Double, MatOfPoint2f>>();
+		List<Pair<Double, MatOfPoint>> hexagons = new ArrayList<Pair<Double, MatOfPoint>>();
+		List<Pair<Double, MatOfPoint>> octagons = new ArrayList<Pair<Double, MatOfPoint>>();
 
 		MatOfPoint largestHexagon = null;
 		double largestHexagonArea = -1;
@@ -393,56 +391,43 @@ class PolygonTracker {
 			double epsilon = 0.005*Imgproc.arcLength(new MatOfPoint2f(contour.toArray()),true);
 			MatOfPoint2f polygon2f = new MatOfPoint2f();
 			Imgproc.approxPolyDP(new MatOfPoint2f(contour.toArray()),polygon2f,epsilon,true);
-			int result = polygonTests(polygon2f, false);
+			//Imgproc.approxPolyDP(polygon2f,polygon2f,0.01*Imgproc.arcLength(polygon2f,true),true);
+			// https://stackoverflow.com/questions/30134903/convert-matofpoint2f-to-matofpoint
+			MatOfPoint polygon = new MatOfPoint();
+			polygon2f.convertTo(polygon, CvType.CV_32S);
+			int result = polygonTests(polygon, false);
 			if(result == -1) { continue; }
 			else if(result == 6) {
-				Pair<Double, MatOfPoint2f> hexagonPair = processHexagon(polygon2f);
+				Pair<Double, MatOfPoint> hexagonPair = processHexagon(polygon);
 				if(!hexagonTest(hexagonPair.getValue())) { continue; }
-				MatOfPoint hexagonTemp = new MatOfPoint();
-				hexagonPair.getValue().convertTo(hexagonTemp, CvType.CV_32S);
-				if(!Imgproc.isContourConvex(hexagonTemp)) { continue; }
+				if(!Imgproc.isContourConvex(hexagonPair.getValue())) { continue; }
 				hexagons.add(hexagonPair);
 			}
 			else if(result == 8) {
-				Pair<Double, MatOfPoint2f> octagonPair = processOctagon(polygon2f);
+				Pair<Double, MatOfPoint> octagonPair = processOctagon(polygon);
 				if(octagonPair != null) {
-					MatOfPoint octagonTemp = new MatOfPoint();
-					octagonPair.getValue().convertTo(octagonTemp, CvType.CV_32S);
-					if(!Imgproc.isContourConvex(octagonTemp)) { continue; }
+					if(!Imgproc.isContourConvex(octagonPair.getValue())) { continue; }
 					octagons.add(octagonPair);
 				}
 			}
 		}
 
-		Collections.sort(hexagons, new Comparator<Pair<Double, MatOfPoint2f>>() {
-			@Override public int compare(final Pair<Double, MatOfPoint2f> p1, final Pair<Double, MatOfPoint2f> p2) {
+		Collections.sort(hexagons, new Comparator<Pair<Double, MatOfPoint>>() {
+			@Override public int compare(final Pair<Double, MatOfPoint> p1, final Pair<Double, MatOfPoint> p2) {
 				return Double.compare(p2.getKey(), p1.getKey());
 			}
 		});
 
-		Collections.sort(octagons, new Comparator<Pair<Double, MatOfPoint2f>>() {
-			@Override public int compare(final Pair<Double, MatOfPoint2f> p1, final Pair<Double, MatOfPoint2f> p2) {
+		Collections.sort(octagons, new Comparator<Pair<Double, MatOfPoint>>() {
+			@Override public int compare(final Pair<Double, MatOfPoint> p1, final Pair<Double, MatOfPoint> p2) {
 				return Double.compare(p2.getKey(), p1.getKey());
 			}
 		});
-
-		List<MatOfPoint2f> _currHexagons = new ArrayList<MatOfPoint2f>();
-		List<MatOfPoint2f> _currOctagons = new ArrayList<MatOfPoint2f>();
 
 		List<MatOfPoint> hexagonsToDraw = new ArrayList<MatOfPoint>();
 		List<MatOfPoint> octagonsToDraw = new ArrayList<MatOfPoint>();
-		for(int i=0;i<hexagons.size();i++) {
-			MatOfPoint m = new MatOfPoint();
-			hexagons.get(i).getValue().convertTo(m, CvType.CV_32S);
-			hexagonsToDraw.add(m);
-			_currHexagons.add(hexagons.get(i).getValue());
-		}
-		for(int i=0;i<octagons.size();i++) {
-			MatOfPoint m = new MatOfPoint();
-			octagons.get(i).getValue().convertTo(m, CvType.CV_32S);
-			octagonsToDraw.add(m);
-			_currOctagons.add(octagons.get(i).getValue());
-		}
+		for(int i=0;i<hexagons.size();i++) { hexagonsToDraw.add(hexagons.get(i).getValue()); }
+		for(int i=0;i<octagons.size();i++) { octagonsToDraw.add(octagons.get(i).getValue()); }
 
 		for(int i=0;i<Math.min(1, hexagonsToDraw.size());i++) {
 			Imgproc.drawContours(mat, hexagonsToDraw, i, new Scalar(0, 255, 0), 1);
@@ -454,19 +439,19 @@ class PolygonTracker {
 			Imgproc.drawContours(mat, octagonsToDraw, i, new Scalar(0, 0, 255), 1);
 		}
 
-		currHexagons = _currHexagons;
-		currOctagons = _currOctagons;
+		currHexagons = hexagonsToDraw;
+		currOctagons = octagonsToDraw;
 
 		panel.setImage(PolygonTracker.bufferedImage(mat));
 		panel.repaint();
 		return true;
 	}
 
-	public List<MatOfPoint2f> getFrameHexagons() {
+	public List<MatOfPoint> getFrameHexagons() {
 		return currHexagons;
 	}
 
-	public List<MatOfPoint2f> getFrameOctagons() {
+	public List<MatOfPoint> getFrameOctagons() {
 		return currOctagons;
 	}
 }
@@ -546,13 +531,13 @@ public class Test {
 		Mat mat = new Mat();
 		int nFrames = 0;
 		while(tracker.TrackPolygonsInFrame(mat)) {
-			List<MatOfPoint2f> hexagons = tracker.getFrameHexagons();
+			List<MatOfPoint> hexagons = tracker.getFrameHexagons();
 			if (hexagons.size() == 0) {
 				continue;
 			}
 		  nFrames++;
 			if (nFrames > 400 && nFrames % 100 == 0) {
-				savedHexagons.add(hexagons.get(0));
+				savedHexagons.add(new MatOfPoint2f(hexagons.get(0).toArray()));
 				frames.add(mat.clone());
 				//Imgproc.putText(mat, "Calibrating!!!!!!!!!!!!!!!!!!", new org.opencv.core.Point(100, 100), Imgproc.FONT_HERSHEY_SIMPLEX, 1, new Scalar(0, 127, 255), 10);
 				tracker.panel.setImage(tracker.bufferedImage(mat));
@@ -573,7 +558,7 @@ public class Test {
 		List<Mat> rvecs = new ArrayList<>();
 		List<Mat> tvecs = new ArrayList<>();
 		Calib3d.calibrateCamera(objectPoints, savedHexagons, new Size(PolygonTracker.WIDTH, PolygonTracker.HEIGHT), cameraMatrix, distCoeffs, rvecs, tvecs);
-		writeCalibrationData(filename + "-calib.txt", cameraMatrix, distCoeffs);
+		//writeCalibrationData(filename + "-calib.txt", cameraMatrix, distCoeffs);
   }
 
 	public static void main(String[] args) {
@@ -583,12 +568,12 @@ public class Test {
 		Mat cameraMatrix = new Mat();
 	  Mat distCoeffs = new Mat();
 		// https://howtodoinjava.com/java/io/how-to-check-if-file-exists-in-java/
-		if(new File(videoFilename + "-calib.txt").exists()) {
+		/*if(new File(videoFilename + "-calib.txt").exists()) {
 			readCalibrationData(videoFilename + "-calib.txt", cameraMatrix, distCoeffs);
 		}
-		else {
-			ComputeCalibration(videoFilename, cameraMatrix, distCoeffs);
-		}
+		else {*/
+		ComputeCalibration(videoFilename, cameraMatrix, distCoeffs);
+		//}
 
 		HexagonObject hexagonObject = new HexagonObject();
 		PolygonTracker tracker = new PolygonTracker(videoFilename + ".mov", 0);
@@ -598,13 +583,13 @@ public class Test {
 		Mat tvec = new Mat();
 		boolean useExtrinsicGuess = false;
 		while(tracker.TrackPolygonsInFrame(mat)) {
-			List<MatOfPoint2f> hexagons = tracker.getFrameHexagons();
+			List<MatOfPoint> hexagons = tracker.getFrameHexagons();
 			//List<MatOfPoint> octagons = tracker.getFrameOctagons();
 			if (hexagons.size() == 0) {
 				useExtrinsicGuess = false;
 				continue;
 			}
-			MatOfPoint2f imagePoints = new MatOfPoint2f(hexagons.get(0).clone());
+			MatOfPoint2f imagePoints = new MatOfPoint2f(hexagons.get(0).toArray());
 			Calib3d.solvePnP(hexagonObject.getObjectPoints(), imagePoints, cameraMatrix, new MatOfDouble(distCoeffs), rvec, tvec, useExtrinsicGuess);
 			useExtrinsicGuess = true;	
 			
