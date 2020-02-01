@@ -35,9 +35,10 @@ class HexagonObject {
 
 	public HexagonObject() {
 		List<org.opencv.core.Point3> pts = new ArrayList<org.opencv.core.Point3>();
+		
 		double theta=Math.PI;
 		for(int i=0; i<6; ++i) {
-			pts.add(new org.opencv.core.Point3(17.625 * Math.cos(theta), 17.625 * Math.sin(theta), 0));
+			pts.add(new org.opencv.core.Point3(17.32 * Math.cos(theta), 17.32 * Math.sin(theta), 0));
 			theta+=Math.PI/3;
 		}
 		/*
@@ -48,7 +49,6 @@ class HexagonObject {
 		pts.add(new org.opencv.core.Point3(1.4,-1.8,0));
 		pts.add(new org.opencv.core.Point3(-1,-2.2,0));
 		*/
-		
 		objectPoints = new MatOfPoint3f();
 	  objectPoints.fromList(pts);
 	}
@@ -516,6 +516,26 @@ public class Test {
 		}
 	}
 
+	public static void printPolygon(MatOfPoint3f polygon, String message) {
+		System.out.println(message);
+		for(int i = 0; i < polygon.toList().size(); ++i) {
+			System.out.println(polygon.toList().get(i));
+		}
+	}
+
+
+	public static void printMatrix(Mat mat, String message) {
+		System.out.println(message);
+		for(int r=0;r<mat.rows();r++) {
+			for(int c=0;c<mat.cols();c++) {
+				for(int i=0;i<mat.get(r, c).length;i++) {
+					System.out.print(Double.toString(mat.get(r, c)[i]) + " ");
+				}
+			}
+			System.out.println();
+		}
+	}
+
 	public static void writeCalibrationData(String filename, Mat cameraMatrix, Mat distCoeffs) {
 		try {
 			FileWriter fileWriter = new FileWriter(filename);
@@ -602,10 +622,10 @@ public class Test {
 			if(nFrames % 100 == 0) {
 				savedHexagons.add(hexagons.get(0));
 				frames.add(mat.clone());
+				Imgproc.putText(mat, "Calibrating!!!!!!!!!!!!!!!!!!", new org.opencv.core.Point(100, 100), Imgproc.FONT_HERSHEY_SIMPLEX, 1, new Scalar(0, 127, 255), 10);
+				tracker.panel.setImage(tracker.bufferedImage(mat));
+				tracker.panel.repaint();
 			}
-			//Imgproc.putText(mat, "Calibrating!!!!!!!!!!!!!!!!!!", new org.opencv.core.Point(100, 100), Imgproc.FONT_HERSHEY_SIMPLEX, 1, new Scalar(0, 127, 255), 10);
-			//tracker.panel.setImage(tracker.bufferedImage(mat));
-			//tracker.panel.repaint();
 			/*if (nFrames > 1100) {
 				break;
 			}*/
@@ -663,9 +683,13 @@ public class Test {
 				continue;
 			}
 			MatOfPoint2f imagePoints = new MatOfPoint2f(hexagons.get(0).clone());
-			printPolygon(imagePoints, "Before solvePnP imagePoints");
+			//printPolygon(imagePoints, "Before solvePnP imagePoints");
+			printPolygon(hexagonObject.getObjectPoints(), "Before solvePnP objectPoints");
+			printMatrix(distCoeffs, "Dist coeffs");
 			Calib3d.solvePnP(hexagonObject.getObjectPoints(), imagePoints, cameraMatrix, new MatOfDouble(distCoeffs), rvec, tvec, useExtrinsicGuess);
 			useExtrinsicGuess = true;	
+			printMatrix(rvec, "rvec");
+			printMatrix(tvec, "tvec");
 			
 			// Draw points.
 			MatOfPoint2f dMat1 = new MatOfPoint2f();
@@ -681,7 +705,7 @@ public class Test {
 			// Draw points.
 			MatOfPoint2f dMat2 = new MatOfPoint2f();
 			Calib3d.projectPoints(
-					hexagonObject.getObjectPoints(-2),
+					hexagonObject.getObjectPoints(-10),
 					rvec,
 					tvec,
 					cameraMatrix,
@@ -700,10 +724,29 @@ public class Test {
 			draw.add(temp2);
 
 			Imgproc.drawContours(mat, draw, 0, new Scalar(0, 0, 255), 4);
-			Imgproc.drawContours(mat, draw, 1, new Scalar(0, 0, 255), 4);
+			Imgproc.drawContours(mat, draw, 1, new Scalar(0, 255, 0), 4);
 			for(int i=0;i<temp1.toList().size();i++) {
 				Imgproc.line(mat, temp1.toList().get(i), temp2.toList().get(i), new Scalar(0, 0, 255), 4);
 			}
+
+			List<org.opencv.core.Point3> vectors = new ArrayList<org.opencv.core.Point3>();
+			vectors.add(new org.opencv.core.Point3(0, 0, 0));
+			vectors.add(new org.opencv.core.Point3(10, 0, 0));
+			vectors.add(new org.opencv.core.Point3(0, 10, 0));
+			vectors.add(new org.opencv.core.Point3(0, 0, 10));
+			MatOfPoint3f m = new MatOfPoint3f();
+			m.fromList(vectors);
+
+			MatOfPoint2f dMat3 = new MatOfPoint2f();
+			Calib3d.projectPoints(m, rvec, tvec, cameraMatrix, new MatOfDouble(distCoeffs), dMat3);
+
+			MatOfPoint temp3 = new MatOfPoint();
+			dMat3.convertTo(temp3, CvType.CV_32S);
+			draw.add(temp3);
+
+			Imgproc.line(mat, temp3.toList().get(0), temp3.toList().get(1), new Scalar(0, 255, 255), 4);
+			Imgproc.line(mat, temp3.toList().get(0), temp3.toList().get(2), new Scalar(0, 255, 0), 4);
+			Imgproc.line(mat, temp3.toList().get(0), temp3.toList().get(3), new Scalar(255, 0, 255), 4);
 
 			tracker.panel.setImage(PolygonTracker.bufferedImage(mat));
 			tracker.panel.repaint();
