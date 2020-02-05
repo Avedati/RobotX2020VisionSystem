@@ -6,14 +6,22 @@ import time
 
 
 class CameraSource(object):
-  def __init__(self, camera_source):
+  def __init__(self, camera_source, output_file=None):
     self.camera = cv2.VideoCapture(camera_source)
     self.ORIGINAL_WIDTH = int(self.camera.get(cv2.CAP_PROP_FRAME_WIDTH))
     self.ORIGINAL_HEIGHT = int(self.camera.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    self.HEIGHT = min(self.ORIGINAL_HEIGHT, 720)
+    self.HEIGHT = min(self.ORIGINAL_HEIGHT, 360)
     self.WIDTH = int(self.ORIGINAL_WIDTH * self.HEIGHT / self.ORIGINAL_HEIGHT)
     self.startTime = time.time()
     self.nFrames = 0
+    if output_file:
+      self.writer = cv2.VideoWriter(
+              output_file,
+              cv2.VideoWriter_fourcc(*'H264'),
+              25,
+              (self.WIDTH, self.HEIGHT))
+    else:
+        self.writer = None
     print(self.ORIGINAL_WIDTH)
 
   def GetFrame(self):  
@@ -30,6 +38,19 @@ class CameraSource(object):
 
   def ImageSize(self):
     return (self.WIDTH, self.HEIGHT)
+
+  def OutputFrameAndTestContinue(self, message, frame):
+    if self.writer:
+      self.writer.write(frame)
+    cv2.imshow(message, frame)
+    k = cv2.waitKey(1) & 0xFF
+    return k != 27
+
+  def __del__(self):
+    if self.writer:
+      self.writer.release()
+    self.camera.release()
+    cv2.destroyAllWindows()
         
 
 class Chessboard(object):
@@ -54,12 +75,6 @@ class Chessboard(object):
 
   def SquareWidth(self):
     return self.squareWidth
-
-
-def ShowFrameAndTestContinue(message, frame):
-  cv2.imshow(message, frame)
-  k = cv2.waitKey(1) & 0xFF
-  return k != 27
 
 
 def RunCalibration(calibVideo, maxSamples=0, forceRecompute=False):
@@ -121,7 +136,7 @@ def RunCalibration(calibVideo, maxSamples=0, forceRecompute=False):
         print('Extracted calibration sample ', len(imagePoints))
            
     # Display frame.
-    if not ShowFrameAndTestContinue('chess', frame):
+    if not camera.OutputFrameAndTestContinue('chess', frame):
       break
     if calibSample:
       time.sleep(0.5)
@@ -142,7 +157,8 @@ def RunCalibration(calibVideo, maxSamples=0, forceRecompute=False):
 
 
 def RunPoseEstimation(video, cameraMatrix, distCoeffs):
-  camera = CameraSource(video)
+  output_file = video + '-detected_pose.mp4'
+  camera = CameraSource(video, output_file)
   chess = Chessboard()
   
   coordFrame = np.zeros((4, 3), np.float32)
@@ -181,7 +197,7 @@ def RunPoseEstimation(video, cameraMatrix, distCoeffs):
       cv2.arrowedLine(frame, coords[0], coords[1], (  0, 255, 0), 2)
       cv2.arrowedLine(frame, coords[0], coords[2], (255, 0, 255), 2)
       cv2.arrowedLine(frame, coords[0], coords[3], (0, 255, 255), 2)
-      if not ShowFrameAndTestContinue('SolvePnP', frame):
+      if not camera.OutputFrameAndTestContinue('SolvePnP', frame):
         break
 
 
