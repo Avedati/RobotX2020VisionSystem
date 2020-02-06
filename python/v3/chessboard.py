@@ -6,8 +6,8 @@ import time
 
 
 class CameraSource(object):
-  def __init__(self, camera_source, height, output_file=None):
-    self.camera = cv2.VideoCapture(camera_source)
+  def __init__(self, cameraSource, height, output_file=None):
+    self.camera = cv2.VideoCapture(cameraSource)
     self.ORIGINAL_WIDTH = int(self.camera.get(cv2.CAP_PROP_FRAME_WIDTH))
     self.ORIGINAL_HEIGHT = int(self.camera.get(cv2.CAP_PROP_FRAME_HEIGHT))
     self.HEIGHT = min(self.ORIGINAL_HEIGHT, height)
@@ -87,16 +87,18 @@ class Chessboard(object):
 
 class Calibration(object):
   def __init__(self, calibVideo, imageHeight, maxSamples):
-    name = str(imageHeight) + '-' + str(maxSamples)
-    self.calibFileCam = calibVideo + '-' + str(name) + '-calib_cam.txt'
-    self.calibFileDist = calibVideo + '-' + str(name) + '-calib_dist.txt'
     self.imageHeight = imageHeight
     self.calibVideo = calibVideo
     self.maxSamples = maxSamples
+    name = self.Id()
+    self.calibFileCam = calibVideo + '-' + str(name) + '-calib_cam.txt'
+    self.calibFileDist = calibVideo + '-' + str(name) + '-calib_dist.txt'
     self.hasCalib = False
     self.cameraMatrix = None
     self.distCoeffs = None
 
+  def Id(self):
+    return str(self.imageHeight) + '-' + str(self.maxSamples)
 
   def PrintInfo(self):
     print('Calibration files:')
@@ -213,9 +215,8 @@ class CoordinateFrame(object):
 
 
 def RunPoseEstimation(video, calib):
-  calib_name = str(calib.imageHeight) + '-' + str(calib.maxSamples)
-  output_file = video + '-' + calib_name + '-detected_pose.mp4'
-  camera = CameraSource(video, calib.imageHeight, output_file)
+  outputFile = video + '-' + calib.Id() + '-detected_pose.mp4'
+  camera = CameraSource(video, calib.imageHeight, outputFile)
   chess = Chessboard()
   
   coordFrame = CoordinateFrame(chess.SquareWidth() * 2)
