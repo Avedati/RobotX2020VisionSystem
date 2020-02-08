@@ -5,6 +5,13 @@ import os
 import time
 
 
+def ShowFrameAndTestContinue(message, frame):
+  cv2.imshow(message, frame)
+  k = cv2.waitKey(1) & 0xFF
+  return k != 27
+
+
+
 class CameraSource(object):
   def __init__(self, cameraSource, height, output_file=None):
     self.camera = cv2.VideoCapture(cameraSource)
@@ -45,9 +52,7 @@ class CameraSource(object):
   def OutputFrameAndTestContinue(self, message, frame):
     if self.writer:
       self.writer.write(frame)
-    cv2.imshow(message, frame)
-    k = cv2.waitKey(1) & 0xFF
-    return k != 27
+    return ShowFrameAndTestContinue(message, frame)
 
 
   def __del__(self):
