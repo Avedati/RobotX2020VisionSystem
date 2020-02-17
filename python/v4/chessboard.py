@@ -321,7 +321,7 @@ def main():
     startFrame = 0
   elif camera == 'raspi':
     calibVideo = os.path.join(calibDir, 'checkerboard-raspi.mov')
-    maxSamples = 5
+    maxSamples = 30
     squareWidth = 7.88
     rows = 6
     cols = 9
