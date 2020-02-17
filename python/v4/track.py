@@ -626,22 +626,25 @@ def main():
   liveFeed = False
 
   dataDir = '/Users/kwatra/Home/pvt/robotx/RobotX2020VisionSystem/data'
+  calibDir = os.path.join(dataDir, 'calib_data')
+  inputDir = os.path.join(dataDir, 'target_videos')
+  outputDir = os.path.join(dataDir, 'output')
 
   if liveFeed:
     videoSource = 0
   elif camera == 'pixel2':
-    videoSource = os.path.join(dataDir, 'vision-tape-target-4.mp4')
+    videoSource = os.path.join(inputDir, 'vision-tape-target-4.mp4')
   elif camera == 'raspi':
-    #videoSource = os.path.join(dataDir, 'vision-tape-raspi-1.mov')
-    videoSource = os.path.join(dataDir, 'vision-tape-raspi-2.mov')
+    #videoSource = os.path.join(inputDir, 'vision-tape-raspi-1.mov')
+    videoSource = os.path.join(inputDir, 'vision-tape-raspi-2.mov')
   else:
     raise ValueError('Unknown camera type.')
 
   if camera == 'pixel2':
-    calibVideo = os.path.join(dataDir, 'chessboard-tv.mp4')
+    calibVideo = os.path.join(calibDir, 'chessboard-tv.mp4')
     maxSamples = 25
   elif camera == 'raspi':
-    calibVideo = os.path.join(dataDir, 'checkerboard-raspi.mov')
+    calibVideo = os.path.join(calibDir, 'checkerboard-raspi.mov')
     maxSamples = 30
   else:
     raise ValueError('Unknown camera type.')
@@ -651,7 +654,8 @@ def main():
     print('Could not load or compute calibration.')
     return
 
-  outputFile = videoSource + '-' + calib.Id() + '-tracked.mp4'
+  outputFile = os.path.join(outputDir,
+      os.path.basename(videoSource) + '-' + calib.Id() + '-tracked.mp4')
   camera = cb.CameraSource(videoSource, calib.imageHeight, outputFile)
 
   tracker = ObjectTracker(calib)

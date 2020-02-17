@@ -266,8 +266,10 @@ class CoordinateFrame(object):
 
 
 
-def RunPoseEstimation(video, calib, chess):
-  outputFile = video + '-' + calib.Id() + '-detected_pose.mp4'
+def RunPoseEstimation(video, outputDir, calib, chess):
+  outputFile = os.path.join(
+      outputDir,
+      os.path.basename(video) + '-' + calib.Id() + '-detected_pose.mp4')
   camera = CameraSource(video, calib.imageHeight, outputFile)
   coordFrame = CoordinateFrame(chess.SquareWidth() * 2)
 
@@ -307,17 +309,19 @@ def main():
   imageHeight = 720
 
   dataDir = '/Users/kwatra/Home/pvt/robotx/RobotX2020VisionSystem/data'
+  calibDir = os.path.join(dataDir, 'calib_data')
+  outputDir = os.path.join(dataDir, 'output')
 
   if camera == 'pixel2':
-    calibVideo = os.path.join(dataDir, 'Chessboard-tv.mp4')
+    calibVideo = os.path.join(calibDir, 'Chessboard-tv.mp4')
     maxSamples = 25
     squareWidth = 8.0
     rows = 6
     cols = 8
     startFrame = 0
   elif camera == 'raspi':
-    calibVideo = os.path.join(dataDir, 'checkerboard-raspi.mov')
-    maxSamples = 30
+    calibVideo = os.path.join(calibDir, 'checkerboard-raspi.mov')
+    maxSamples = 5
     squareWidth = 7.88
     rows = 6
     cols = 9
@@ -336,7 +340,7 @@ def main():
     print('Successfully loaded calibration.')
 
   chess = Chessboard(squareWidth, rows, cols)
-  RunPoseEstimation(calibVideo, calib, chess) 
+  RunPoseEstimation(calibVideo, outputDir, calib, chess) 
 
 
 if __name__ == '__main__':
