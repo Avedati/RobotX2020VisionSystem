@@ -542,7 +542,7 @@ class ObjectTracker(object):
         obj_pts = hex_pts[1]
 
     self.RunPoseEstimationTarget(img_pts, obj_pts, frame)
-    self.ComputeCorrectionAngle(frame)
+    self.ComputeLaunchData(frame)
     
     return gray, edges
 
@@ -611,7 +611,7 @@ class ObjectTracker(object):
       coord_frame.Draw(frame, self.rvec, self.tvec, self.calib)
 
  
-  def ComputeCorrectionAngle(self, frame=None):
+  def ComputeLaunchData(self, frame=None):
     if self.rvec is None or self.tvec is None:
       return None, None
 
@@ -652,6 +652,7 @@ class ObjectTracker(object):
       """Computes rotation (about y-axis) that would align robot with target.
          +ve angle => counter-clockwise => turn left.
          -ve angle => clockwise => turn right.
+         Sign changed in network table to make -ve imply left and vice-versa.
       """
       # Vector from robot to target in world coords.
       rob_to_tgt = target - rob_origin
@@ -666,13 +667,31 @@ class ObjectTracker(object):
       yaw = math.atan2(x1*z2 - z1*x2, x1*x2 + z1*z2)
       return yaw, rob_to_tgt
 
+    #-------------------------------------------------------------------------#
     target_frnt = np.array((0, 0, 0))
     target_back = np.array((0, 0, self.hexagon.z_back))
 
+    # Robot location and correction angles.
     rob_origin, rob_orient = compute_robot_loc()
     yaw_frnt, rob_to_frnt = compute_yaw(target_frnt, rob_origin, rob_orient)
     yaw_back, rob_to_back = compute_yaw(target_back, rob_origin, rob_orient)
-    
+
+    # Launch data for 3 scenarios:
+    # 0: Current orientation
+    # 1: Orient towards front target (hexagon)
+    # 2: Orient towards back target (circle)
+    launch_data = [{}, {}, {}]
+    launch_data[0] = {'orient': rob_orient, 'angle': 0}
+    launch_data[1] = {'orient': rob_to_frnt, 'angle': -yaw_frnt * 180/np.pi}
+    launch_data[2] = {'orient': rob_to_back, 'angle': -yaw_back * 180/np.pi}
+
+    # Determine the "ball plane" and viability for each of the three
+    # orientations: current, towards-front-center, towards-back-center.
+    for i in range(3):
+      points, viable = self.ComputeImpactLocation(
+          launch_data[i]['orient'], rob_origin)
+      launch_data[i].update({'points': points, 'viable': viable})
+
     # Robot alignment angles for front and back target.
     # Change sign of yaw angle, so left turn is -ve and right turn is +ve.
     self.angle_frnt = -yaw_frnt * 180 / np.pi
@@ -680,10 +699,6 @@ class ObjectTracker(object):
     sd.putNumber('AngleFrontHexagon', self.angle_frnt)
     sd.putNumber('AngleBackCircle', self.angle_back)
     sd.putBoolean('TrackingSuccess', self.trackingSuccess)
-
-    #print('front back angle: ', self.angle_frnt, self.angle_back)
-    #print('robot origin: ', rob_origin)
-    #print('robot orient: ', rob_orient, np.linalg.norm(rob_orient))
 
     if frame is not None:
       # Clearance circle.
@@ -695,41 +710,21 @@ class ObjectTracker(object):
                           frame,
                           (255, 0, 255)) 
 
-      cv2.putText(frame, 'Front angle: ' + str(int(self.angle_frnt * 100)/100),
-          (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255))
-      cv2.putText(frame, 'Back angle: ' + str(int(self.angle_back * 100)/100),
-          (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255))
-
-      # Visualize the "ball plane" within which the ball will fly towards the
-      # target, for: current robot orientation, and when the robot is turned to
-      # align with front and back targets.
-      rob_to_tgt_vecs = [rob_orient, rob_to_frnt, rob_to_back]
+      # Ball plane intersection with target plane.
       colors = [(255, 0, 0), (255, 0, 255), (0, 0, 255)]
-      for rob_to_tgt, color in zip(rob_to_tgt_vecs, colors):
-        # Normalized robot-target vector in x-z plane. Since we are computing
-        # the ball plane assuming robot is oriented in this direction, this is
-        # same as the z-vector in robot's coordinate system.
-        rob_z = (rob_to_tgt[0], 0, rob_to_tgt[2])
-        norm_z = np.linalg.norm(rob_z)
-        if norm_z == 0:
-          print('Encountered zero-norm robot orientation')
-          continue
-        rob_z = rob_z / norm_z
+      names = ['Current angle', 'Front angle', 'Back angle']
+      for i in range(3):
+        name = names[i] + ' '
+        color = colors[i]
+        data = launch_data[i]
+        angle = data['angle']
+        viable = 'OK' if data['viable'] else 'Obstacle'
+        cv2.putText(frame, name + str(int(angle * 100)/100) + ' ' + viable,
+            (10, 30*(i+1)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255))
 
-        # Find point of intersection of ray from robot to z=0 (target's) plane.
-        # Ray-plane intersection:
-        # Find d s.t. the point (rob_origin + d * rob_z) satisfies plane
-        # equation (z = 0).
-        # equiv. to solving rob_origin[2] + d * rob_z[2] = 0.
-        if abs(rob_z[2]) < 0.01:
-          print('Robot oriented 90-degrees away from target plane.')
-          continue
-        d = -rob_origin[2]/rob_z[2]
-        point = rob_origin + d * rob_z
-
-        # Draw line from base of target to the same level as target center.
-        base = point
-        center = (point[0], 0, point[2])
+        # Draw line from target "base" (same y-level as robot) to target center.
+        base = data['points'][0]
+        center = data['points'][1]
         points, _ = cv2.projectPoints(np.asarray([base, center]),
                                       self.rvec,
                                       self.tvec,
@@ -738,6 +733,44 @@ class ObjectTracker(object):
         points = [tuple(np.squeeze(x).astype(int)) for x in points.tolist()]
         points = [(min(x, frame.shape[1]), min(y, frame.shape[0])) for x,y in points] 
         cv2.arrowedLine(frame, points[0], points[1], color, 2, tipLength=0.01)
+
+
+  def ComputeImpactLocation(self, robot_to_target, rob_origin):
+    """Determine the "ball plane" within which the ball will fly towards the
+    target, given the robot_to_target direction vector.
+    Ball plane is the plane between the robot orientation and y-axis. Returned
+    as two points on the target's front plane: one at the same y-value as the
+    robot (base), and second at the y-value of 0 (target center).
+    Also checks the viability (will not hit obstacle).
+    """
+    # Normalized robot-target vector in x-z plane. Since we are computing
+    # the ball plane assuming robot is oriented in this direction, this is
+    # same as the z-vector in robot's coordinate system.
+    rob_z = (robot_to_target[0], 0, robot_to_target[2])
+    norm_z = np.linalg.norm(rob_z)
+    if norm_z == 0:
+      print('Encountered zero-norm robot orientation')
+      return None, False
+    rob_z = rob_z / norm_z
+
+    # Find point of intersection of ray from robot to z=0 (target's) plane.
+    # Ray-plane intersection:
+    # Find d s.t. the point (rob_origin + d * rob_z) satisfies plane
+    # equation (z = 0).
+    # equiv. to solving rob_origin[2] + d * rob_z[2] = 0.
+    if abs(rob_z[2]) < 0.01:
+      print('Robot oriented 90-degrees away from target plane.')
+      return None, False
+    d = -rob_origin[2]/rob_z[2]
+    base = rob_origin + d * rob_z
+    center = (base[0], 0, base[2])
+
+    # Impact is viable only if the x-location lies within clearance circle.
+    # Else ball could hit an obstacle. Only x matters for viability, since
+    # y location will depend on ball speed.
+    viable = abs(center[0]) < self.r_clear
+
+    return (base, center), viable
 
 
 
