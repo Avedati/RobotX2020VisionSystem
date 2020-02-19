@@ -704,8 +704,8 @@ class ObjectTracker(object):
     # Change sign of yaw angle, so left turn is -ve and right turn is +ve.
     self.angle_front = -yaw_front * 180 / np.pi
     self.angle_back = -yaw_back * 180 / np.pi
-    sd.putNumber('AngleOuterPort', self.angle_front)
-    sd.putNumber('AngleInnerPort', self.angle_back)
+    sd.putNumber('AngleFrontPort', self.angle_front)
+    sd.putNumber('AngleBackPort', self.angle_back)
     sd.putBoolean('TrackingSuccess', self.trackingSuccess)
 
     if frame is not None:
@@ -730,13 +730,14 @@ class ObjectTracker(object):
       names = ['Current aim', '  Front aim', '   Back aim']
       for i in range(3):
         name = names[i] + ' '
+        color = colors[i]
         data = launch_data[i]
         angle_text = name + ' ' + str(int(data['angle'] * 100) / 100)
         viable = data['viable']
         viable_text = [n + ('OK' if x else '__') for n,x in zip(['F ','B '], viable)]
         viable_color = [(0, 255, 0) if x else (0, 0, 255) for x in viable]
         cv2.putText(frame, angle_text, (10, 30*(i+1)), cv2.FONT_HERSHEY_SIMPLEX, 0.5,
-                    (255, 255, 255))
+                    color)
         cv2.putText(frame, viable_text[0], (200, 30*(i+1)), cv2.FONT_HERSHEY_SIMPLEX, 0.5,
                     viable_color[0])
         cv2.putText(frame, viable_text[1], (260, 30*(i+1)), cv2.FONT_HERSHEY_SIMPLEX, 0.5,
@@ -744,7 +745,6 @@ class ObjectTracker(object):
 
         # Draw line from target "base" (same y-level as robot) to front aim.
         # Draw an 'x' for back aim location.
-        color = colors[i]
         points, _ = cv2.projectPoints(np.asarray(data['points']),
                                       self.rvec,
                                       self.tvec,
