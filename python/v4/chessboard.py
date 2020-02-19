@@ -261,7 +261,7 @@ class CoordinateFrame(object):
     # Draw coordinate axes.
     coords = [tuple(np.squeeze(x).astype(int)) for x in coords.tolist()]
     cv2.arrowedLine(frame, coords[0], coords[1], (  0, 255, 0), 2)
-    cv2.arrowedLine(frame, coords[0], coords[2], (255, 0, 255), 2)
+    cv2.arrowedLine(frame, coords[0], coords[2], (255, 255, 0), 2)
     cv2.arrowedLine(frame, coords[0], coords[3], (0, 255, 255), 2)
 
 

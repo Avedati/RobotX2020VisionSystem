@@ -108,7 +108,7 @@ def select(contour, x_lo=None, y_lo=None, x_hi=None, y_hi=None, frame=None):
 def DrawPolygon(polygon,
                 frame,
                 line_color,
-                circle_color,
+                circle_color=None,
                 circle_radius=5,
                 circle_thickness=2,
                 draw_index=False,
@@ -121,11 +121,33 @@ def DrawPolygon(polygon,
     x2 = int(polygon[(i+1)%npts][0])
     y2 = int(polygon[(i+1)%npts][1])
     cv2.line(frame, (x1, y1), (x2, y2), line_color, 2)
-    cv2.circle(frame, (x1, y1), circle_radius, circle_color, circle_thickness)
+    if circle_color is not None:
+      cv2.circle(frame, (x1, y1), circle_radius, circle_color, circle_thickness)
     if draw_index_scale > 0:
       cv2.putText(frame, str(i), (x1, y1), cv2.FONT_HERSHEY_SIMPLEX,
                   0.5 * draw_index_scale, (0, 0, 0))
   
+
+def DrawProjectedCircle(center_z, radius, rvec, tvec, calib, frame, color):
+  # Sample points on circle.
+  npts = 12
+  points = []
+  for i in range(npts):
+    theta = i * 2 * np.pi / npts
+    points.append(
+        np.array((radius * np.cos(theta), radius * np.sin(theta), center_z)))
+  points = np.asarray(points, np.float32)
+
+  # Project to image plane.
+  points, _ = cv2.projectPoints(
+        points, rvec, tvec, calib.cameraMatrix, calib.distCoeffs)
+
+  # Fit and draw ellipse.
+  box = cv2.fitEllipse(points)
+  cv2.ellipse(frame, box, color, 2)
+  #DrawPolygon(points, frame, color)
+
+
 
 class TargetObject(object):
   def __init__(self,
@@ -149,6 +171,8 @@ class TargetObject(object):
     # Back circle (z-offset and radius)
     self.r_back = 6.49
     self.z_back = 29.25
+    # Height of hexagon center.
+    self.y_base = 98.25
  
 
   def GetContourMatches(self, contours):
@@ -215,7 +239,7 @@ class TargetObject(object):
         matches.append((c, m))
    
     if len(matches) == 0:
-      return [], []
+      return None
 
     matches.sort(key=lambda cm: -cv2.arcLength(cm[0], True))
 
@@ -482,6 +506,14 @@ class ObjectTracker(object):
     self.rvec = None
     self.tvec = None
     self.trackingSuccess = False
+    # Radius of ball
+    self.r_ball = 3.5 # Inches.
+    # The vector between camera and back center should lie within a circle
+    # around the front center, such that it is far enough away from target's
+    # edges to allow the ball to pass.
+    hexagon_shortest_dist = self.hexagon.r_in * np.sin(np.pi/3)
+    eps = 1.0
+    self.r_clear = hexagon_shortest_dist - self.r_ball - eps
 
 
   def Track(self, frame):
@@ -496,18 +528,21 @@ class ObjectTracker(object):
     polygons = [c for c in polygons if len(c) < 20]
     polygons = [c for c in polygons if cv2.arcLength(c, False) > 200 * self.scale]
 
-    # Only keep bottom contour from tape for estimation.
+    img_pts = []
+    obj_pts = []
     tape_pts = self.tape.GetBestMatch(polygons, gray, frame, (0, 0, 255))
-    img_pts = tape_pts[0][:4]
-    obj_pts = tape_pts[1][:4]
-
-    if True: #len(img_pts[0]) == 0:
+    if tape_pts is not None:
+      # Only keep bottom contour from tape for estimation.
+      img_pts = tape_pts[0][:4]
+      obj_pts = tape_pts[1][:4]
+    else:
       hex_pts = self.hexagon.GetBestMatch(polygons, gray, frame, (0, 255, 255))
-      img_pts += hex_pts[0]
-      obj_pts += hex_pts[1]
+      if hex_pts is not None:
+        img_pts = hex_pts[0]
+        obj_pts = hex_pts[1]
 
     self.RunPoseEstimationTarget(img_pts, obj_pts, frame)
-    self.ComputeCorrectionAngle()
+    self.ComputeCorrectionAngle(frame)
     
     return gray, edges
 
@@ -537,19 +572,13 @@ class ObjectTracker(object):
     # Draw projection of original targets.
     if frame is not None and self.rvec is not None and self.tvec is not None:
       # Draw back circle.
-      # Start by scaling and moving hexagon points to back wall.
-      ratio = self.hexagon.r_back / self.hexagon.r_in
-      circle_pts = list(self.hexagon.points3d)
-      circle_pts = np.asarray([c * ratio for c in circle_pts])
-      circle_pts += np.array((0, 0, self.hexagon.z_back))
-      circle_pts, _ = cv2.projectPoints(circle_pts,
-                                        self.rvec,
-                                        self.tvec,
-                                        self.calib.cameraMatrix,
-                                        self.calib.distCoeffs)
-      # Fit and draw ellipse.
-      box = cv2.fitEllipse(circle_pts)
-      cv2.ellipse(frame, box, (0, 0, 255), 2)
+      DrawProjectedCircle(self.hexagon.z_back,
+                          self.hexagon.r_back,
+                          self.rvec,
+                          self.tvec,
+                          self.calib,
+                          frame,
+                          (0, 0, 255))
 
       # Draw projections of hexagon target points.
       hexagon, _ = cv2.projectPoints(self.hexagon.points3d,
@@ -581,47 +610,140 @@ class ObjectTracker(object):
       coord_frame = cb.CoordinateFrame(self.hexagon.r_in * 0.5)
       coord_frame.Draw(frame, self.rvec, self.tvec, self.calib)
 
-
-  def ComputeCorrectionAngle(self):
-    if not self.trackingSuccess:
+ 
+  def ComputeCorrectionAngle(self, frame=None):
+    if self.rvec is None or self.tvec is None:
       return None, None
 
+    # TODO: Should be computed as calibration between camera amd robot.
+    #
+    # Yaw (in radians): angle from camera orientation to robot orientation.
+    # Should be +ve if robot is to the left of camera.
+    self.camera_to_robot_yaw = 0 #-10 * np.pi / 180
+    # Offset vector: vector from camera origin to robot origin.
+    self.camera_to_robot_vec = (0, 0, 0)
+
     tvec = np.squeeze(self.tvec)
-    dst, _ = cv2.Rodrigues(self.rvec)
+    rmat, _ = cv2.Rodrigues(self.rvec)
+
+    def cam2world(point):
+      return np.matmul(np.transpose(rmat), (point - tvec))
+
+    def compute_robot_loc():
+      """Computes robot origin and orientation in world coordinates."""
+      # Camera origin and orientation (z-vector) in world coords.
+      cam_origin = cam2world(np.zeros((3,)))
+      cam_orient = cam2world(np.asarray([0, 0, 1])) - cam_origin
+
+      # Robot orientation in world coordinates:
+      # Project to x-z plane and apply camera to robot rotation about y-axis.
+      x, _, z = tuple(cam_orient)
+      yaw = self.camera_to_robot_yaw
+      rob_orient = np.array((x * np.cos(yaw) - z * np.sin(yaw), 0,
+                             x * np.sin(yaw) + z * np.cos(yaw)))
+      rob_norm = np.linalg.norm(rob_orient)
+      if rob_norm > 0:
+        rob_orient = rob_orient / rob_norm
+      # Robot origin in world coords.
+      rob_origin = cam_origin + self.camera_to_robot_vec
+      return rob_origin, rob_orient
+
+    def compute_yaw(target, rob_origin, rob_orient):
+      """Computes rotation (about y-axis) that would align robot with target.
+         +ve angle => counter-clockwise => turn left.
+         -ve angle => clockwise => turn right.
+      """
+      # Vector from robot to target in world coords.
+      rob_to_tgt = target - rob_origin
+
+      # Project robot-target vector and robot orientation in x-z plane. 
+      x1, z1 = (rob_orient[0], rob_orient[2]) 
+      x2, z2 = (rob_to_tgt[0], rob_to_tgt[2]) 
+
+      # https://math.stackexchange.com/questions/317874/calculate-the-angle-between-two-vectors
+      # Let 𝑎=(𝑥1,𝑦1), 𝑏=(𝑥2,𝑦2). If 𝜃 is the "oriented" angle from 𝑎 to 𝑏
+      # (that is, rotating 𝑎̂  by 𝜃 gives 𝑏̂ ), then: 𝜃=atan2(𝑥1𝑦2−𝑦1𝑥2,𝑥1𝑥2+𝑦1𝑦2)
+      yaw = math.atan2(x1*z2 - z1*x2, x1*x2 + z1*z2)
+      return yaw, rob_to_tgt
+
+    target_frnt = np.array((0, 0, 0))
+    target_back = np.array((0, 0, self.hexagon.z_back))
+
+    rob_origin, rob_orient = compute_robot_loc()
+    yaw_frnt, rob_to_frnt = compute_yaw(target_frnt, rob_origin, rob_orient)
+    yaw_back, rob_to_back = compute_yaw(target_back, rob_origin, rob_orient)
     
-    def compute_angle_y(point):
-      vector = np.matmul(dst, point) + tvec
-      theta = math.atan2(vector[1], vector[2])
-      return theta
+    # Robot alignment angles for front and back target.
+    # Change sign of yaw angle, so left turn is -ve and right turn is +ve.
+    self.angle_frnt = -yaw_frnt * 180 / np.pi
+    self.angle_back = -yaw_back * 180 / np.pi
+    sd.putNumber('AngleFrontHexagon', self.angle_frnt)
+    sd.putNumber('AngleBackCircle', self.angle_back)
+    sd.putBoolean('TrackingSuccess', self.trackingSuccess)
 
-    front_theta = compute_angle_y(np.array((0, 0, 0))) * 180/np.pi
-    back_theta = compute_angle_y(np.array((0, 0, -self.hexagon.z_back))) * 180/np.pi
-    print('tvec, front angle, back angle: ', tvec, front_theta, back_theta) 
-    sd.putNumber('targetValue', front_theta)
-    return front_theta, back_theta
+    #print('front back angle: ', self.angle_frnt, self.angle_back)
+    #print('robot origin: ', rob_origin)
+    #print('robot orient: ', rob_orient, np.linalg.norm(rob_orient))
 
+    if frame is not None:
+      # Clearance circle.
+      DrawProjectedCircle(0,
+                          self.r_clear,
+                          self.rvec,
+                          self.tvec,
+                          self.calib,
+                          frame,
+                          (255, 0, 255)) 
 
-  def ComputeCorrectionAngleOld(self):
-    tvec = np.squeeze(self.tvec)
-    dst, _ = cv2.Rodrigues(self.rvec)
-    vectors = []
-    for pt in list(self.points3d):
-      x = dst[0][0] * pt[0] + dst[0][1] * pt[1] + dst[0][2] * pt[2] + tvec[0]
-      y = dst[1][0] * pt[0] + dst[1][1] * pt[1] + dst[1][2] * pt[2] + tvec[1]
-      z = dst[2][0] * pt[0] + dst[2][1] * pt[1] + dst[2][2] * pt[2] + tvec[2]
-      vectors.append((x, y, z))
-    midX = (vectors[0][0] + vectors[3][0] + vectors[4][0] + vectors[7][0]) / 4
-    midY = (vectors[0][1] + vectors[3][1] + vectors[4][1] + vectors[7][1]) / 4
-    midZ = (vectors[0][2] + vectors[3][2] + vectors[4][2] + vectors[7][2]) / 4
-    theta = math.atan2(midZ, midX)
-    print('correction: ', (midX, midY, midZ), theta) 
-    sd.putNumber('targetValue', theta)
+      cv2.putText(frame, 'Front angle: ' + str(int(self.angle_frnt * 100)/100),
+          (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255))
+      cv2.putText(frame, 'Back angle: ' + str(int(self.angle_back * 100)/100),
+          (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255))
+
+      # Visualize the "ball plane" within which the ball will fly towards the
+      # target, for: current robot orientation, and when the robot is turned to
+      # align with front and back targets.
+      rob_to_tgt_vecs = [rob_orient, rob_to_frnt, rob_to_back]
+      colors = [(255, 0, 0), (255, 0, 255), (0, 0, 255)]
+      for rob_to_tgt, color in zip(rob_to_tgt_vecs, colors):
+        # Normalized robot-target vector in x-z plane. Since we are computing
+        # the ball plane assuming robot is oriented in this direction, this is
+        # same as the z-vector in robot's coordinate system.
+        rob_z = (rob_to_tgt[0], 0, rob_to_tgt[2])
+        norm_z = np.linalg.norm(rob_z)
+        if norm_z == 0:
+          print('Encountered zero-norm robot orientation')
+          continue
+        rob_z = rob_z / norm_z
+
+        # Find point of intersection of ray from robot to z=0 (target's) plane.
+        # Ray-plane intersection:
+        # Find d s.t. the point (rob_origin + d * rob_z) satisfies plane
+        # equation (z = 0).
+        # equiv. to solving rob_origin[2] + d * rob_z[2] = 0.
+        if abs(rob_z[2]) < 0.01:
+          print('Robot oriented 90-degrees away from target plane.')
+          continue
+        d = -rob_origin[2]/rob_z[2]
+        point = rob_origin + d * rob_z
+
+        # Draw line from base of target to the same level as target center.
+        base = point
+        center = (point[0], 0, point[2])
+        points, _ = cv2.projectPoints(np.asarray([base, center]),
+                                      self.rvec,
+                                      self.tvec,
+                                      self.calib.cameraMatrix,
+                                      self.calib.distCoeffs) 
+        points = [tuple(np.squeeze(x).astype(int)) for x in points.tolist()]
+        points = [(min(x, frame.shape[1]), min(y, frame.shape[0])) for x,y in points] 
+        cv2.arrowedLine(frame, points[0], points[1], color, 2, tipLength=0.01)
 
 
 
 def main():
   camera = 'pixel2'  
-  #camera = 'raspi'  
+  #camera = 'raspi'
   imageHeight = 720
   liveFeed = False
 
