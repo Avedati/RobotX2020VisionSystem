@@ -513,8 +513,12 @@ class ObjectTracker(object):
     # edges to allow the ball to pass.
     hexagon_shortest_dist = self.hexagon.r_in * np.sin(np.pi/3)
     eps = 1.0
-    self.r_clear = hexagon_shortest_dist - self.r_ball - eps
-
+    self.r_clear_front = hexagon_shortest_dist - self.r_ball - eps
+    # Similar computation for back circle but with lower epsilon (we are OK if
+    # it hits the edge of the back circle), because it would still have fallen
+    # inside the hexagon in that case.
+    eps = 0.1
+    self.r_clear_back = self.hexagon.r_back - self.r_ball - eps
 
   def Track(self, frame):
     gray, edges = GetEdgeImage(frame)
@@ -621,7 +625,7 @@ class ObjectTracker(object):
     # Should be +ve if robot is to the left of camera.
     self.camera_to_robot_yaw = 0 #-10 * np.pi / 180
     # Offset vector: vector from camera origin to robot origin.
-    self.camera_to_robot_vec = (0, 0, 0)
+    self.camera_to_robot_vec = (0, 10, 10)
 
     tvec = np.squeeze(self.tvec)
     rmat, _ = cv2.Rodrigues(self.rvec)
@@ -668,12 +672,12 @@ class ObjectTracker(object):
       return yaw, rob_to_tgt
 
     #-------------------------------------------------------------------------#
-    target_frnt = np.array((0, 0, 0))
+    target_front = np.array((0, 0, 0))
     target_back = np.array((0, 0, self.hexagon.z_back))
 
     # Robot location and correction angles.
     rob_origin, rob_orient = compute_robot_loc()
-    yaw_frnt, rob_to_frnt = compute_yaw(target_frnt, rob_origin, rob_orient)
+    yaw_front, rob_to_front = compute_yaw(target_front, rob_origin, rob_orient)
     yaw_back, rob_to_back = compute_yaw(target_back, rob_origin, rob_orient)
 
     # Launch data for 3 scenarios:
@@ -682,50 +686,66 @@ class ObjectTracker(object):
     # 2: Orient towards back target (circle)
     launch_data = [{}, {}, {}]
     launch_data[0] = {'orient': rob_orient, 'angle': 0}
-    launch_data[1] = {'orient': rob_to_frnt, 'angle': -yaw_frnt * 180/np.pi}
+    launch_data[1] = {'orient': rob_to_front, 'angle': -yaw_front * 180/np.pi}
     launch_data[2] = {'orient': rob_to_back, 'angle': -yaw_back * 180/np.pi}
 
     # Determine the "ball plane" and viability for each of the three
     # orientations: current, towards-front-center, towards-back-center.
+    # Ball plane: 3 points (base, aim_front, aim_back).
+    # Viability: 2 booleans (front target viable, back target viable).
+    # Speed: 2 floats (front target speed, back target speed) if viable.
     for i in range(3):
-      points, viable = self.ComputeImpactLocation(
+      points, viable, speeds = self.ComputeBallPlaneAndSpeed(
           launch_data[i]['orient'], rob_origin)
-      launch_data[i].update({'points': points, 'viable': viable})
+      launch_data[i].update(
+          {'points': points, 'viable': viable, 'speeds': speeds})
 
     # Robot alignment angles for front and back target.
     # Change sign of yaw angle, so left turn is -ve and right turn is +ve.
-    self.angle_frnt = -yaw_frnt * 180 / np.pi
+    self.angle_front = -yaw_front * 180 / np.pi
     self.angle_back = -yaw_back * 180 / np.pi
-    sd.putNumber('AngleFrontHexagon', self.angle_frnt)
-    sd.putNumber('AngleBackCircle', self.angle_back)
+    sd.putNumber('AngleOuterPort', self.angle_front)
+    sd.putNumber('AngleInnerPort', self.angle_back)
     sd.putBoolean('TrackingSuccess', self.trackingSuccess)
 
     if frame is not None:
-      # Clearance circle.
+      # Clearance circles.
       DrawProjectedCircle(0,
-                          self.r_clear,
+                          self.r_clear_front,
                           self.rvec,
                           self.tvec,
                           self.calib,
                           frame,
                           (255, 0, 255)) 
+      DrawProjectedCircle(self.hexagon.z_back,
+                          self.r_clear_back,
+                          self.rvec,
+                          self.tvec,
+                          self.calib,
+                          frame,
+                          (0, 127, 255)) 
 
       # Ball plane intersection with target plane.
-      colors = [(255, 0, 0), (255, 0, 255), (0, 0, 255)]
-      names = ['Current angle', 'Front angle', 'Back angle']
+      colors = [(255, 0, 0), (255, 0, 255), (0, 127, 255)]
+      names = ['Current aim', '  Front aim', '   Back aim']
       for i in range(3):
         name = names[i] + ' '
-        color = colors[i]
         data = launch_data[i]
-        angle = data['angle']
-        viable = 'OK' if data['viable'] else 'Obstacle'
-        cv2.putText(frame, name + str(int(angle * 100)/100) + ' ' + viable,
-            (10, 30*(i+1)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255))
+        angle_text = name + ' ' + str(int(data['angle'] * 100) / 100)
+        viable = data['viable']
+        viable_text = [n + ('OK' if x else '__') for n,x in zip(['F ','B '], viable)]
+        viable_color = [(0, 255, 0) if x else (0, 0, 255) for x in viable]
+        cv2.putText(frame, angle_text, (10, 30*(i+1)), cv2.FONT_HERSHEY_SIMPLEX, 0.5,
+                    (255, 255, 255))
+        cv2.putText(frame, viable_text[0], (200, 30*(i+1)), cv2.FONT_HERSHEY_SIMPLEX, 0.5,
+                    viable_color[0])
+        cv2.putText(frame, viable_text[1], (260, 30*(i+1)), cv2.FONT_HERSHEY_SIMPLEX, 0.5,
+                    viable_color[1])
 
-        # Draw line from target "base" (same y-level as robot) to target center.
-        base = data['points'][0]
-        center = data['points'][1]
-        points, _ = cv2.projectPoints(np.asarray([base, center]),
+        # Draw line from target "base" (same y-level as robot) to front aim.
+        # Draw an 'x' for back aim location.
+        color = colors[i]
+        points, _ = cv2.projectPoints(np.asarray(data['points']),
                                       self.rvec,
                                       self.tvec,
                                       self.calib.cameraMatrix,
@@ -733,15 +753,22 @@ class ObjectTracker(object):
         points = [tuple(np.squeeze(x).astype(int)) for x in points.tolist()]
         points = [(min(x, frame.shape[1]), min(y, frame.shape[0])) for x,y in points] 
         cv2.arrowedLine(frame, points[0], points[1], color, 2, tipLength=0.01)
+        cv2.drawMarker(frame, points[2], color, cv2.MARKER_TILTED_CROSS, 10, 2)
 
 
-  def ComputeImpactLocation(self, robot_to_target, rob_origin):
+  def ComputeBallPlaneAndSpeed(self, robot_to_target, rob_origin):
     """Determine the "ball plane" within which the ball will fly towards the
     target, given the robot_to_target direction vector.
+
     Ball plane is the plane between the robot orientation and y-axis. Returned
-    as two points on the target's front plane: one at the same y-value as the
-    robot (base), and second at the y-value of 0 (target center).
-    Also checks the viability (will not hit obstacle).
+    as three points:
+      base: On the target's front plane at the same y-value as the robot 
+      aim_front: On target's front plane's center at y-value of 0.
+      aim_back: On target's back circle's center at y-value of 0. 
+    Checks the viability:
+      Tuple indicating if entering (front, back) target is viable.
+    Ball speed:
+      Tuple indicating ball speed for (front, back) target, if viable.
     """
     # Normalized robot-target vector in x-z plane. Since we are computing
     # the ball plane assuming robot is oriented in this direction, this is
@@ -750,7 +777,7 @@ class ObjectTracker(object):
     norm_z = np.linalg.norm(rob_z)
     if norm_z == 0:
       print('Encountered zero-norm robot orientation')
-      return None, False
+      return None, (False, False), (0.0, 0.0)
     rob_z = rob_z / norm_z
 
     # Find point of intersection of ray from robot to z=0 (target's) plane.
@@ -760,17 +787,29 @@ class ObjectTracker(object):
     # equiv. to solving rob_origin[2] + d * rob_z[2] = 0.
     if abs(rob_z[2]) < 0.01:
       print('Robot oriented 90-degrees away from target plane.')
-      return None, False
-    d = -rob_origin[2]/rob_z[2]
-    base = rob_origin + d * rob_z
-    center = (base[0], 0, base[2])
+      return None, (False, False), (0.0, 0.0)
+    df = -rob_origin[2]/rob_z[2]
+    base = rob_origin + df * rob_z
+    aim_front = np.array((base[0], 0, base[2]))
 
-    # Impact is viable only if the x-location lies within clearance circle.
-    # Else ball could hit an obstacle. Only x matters for viability, since
-    # y location will depend on ball speed.
-    viable = abs(center[0]) < self.r_clear
+    # For back plane solve for z=z_back.
+    db = (self.hexagon.z_back - rob_origin[2])/rob_z[2]
+    base_back = rob_origin + db * rob_z
+    aim_back = np.array((base_back[0], 0, base_back[2]))
 
-    return (base, center), viable
+    # Launch is viable only if the x-location lies within clearance circle.
+    # Else ball could hit an obstacle. Only x matters for initial viability,
+    # since y location will depend on ball speed.
+    viable_front = abs(aim_front[0]) < self.r_clear_front
+    viable_back = viable_front and abs(aim_back[0]) < self.r_clear_back
+   
+    # TODO: Compute speeds.
+    speeds = (0.0, 0.0)
+
+    points = (base, aim_front, aim_back)
+    viable = (viable_front, viable_back)
+
+    return points, viable, speeds
 
 
 
