@@ -11,7 +11,7 @@ def ShowFrameAndTestContinue(message, frame, height=None):
     frame = cv2.resize(frame, (width, height))
   cv2.imshow(message, frame)
   k = cv2.waitKey(1) & 0xFF
-  return k != 27
+  return k != 27, k
 
 
 class VideoWriter(object):
@@ -225,7 +225,7 @@ class Calibration(object):
           print('Extracted calibration sample ', len(imagePoints))
              
       # Display frame.
-      if not camera.OutputFrameAndTestContinue('chess', frame, height=None):
+      if not camera.OutputFrameAndTestContinue('chess', frame, height=None)[0]:
         print('User stopped calibration process...')
         return False
       if calibSample:
@@ -299,7 +299,7 @@ def RunPoseEstimation(video, outputDir, calib, chess):
       # Draw coordinate axes.
       coordFrame.Draw(frame, rvec, tvec, calib)
 
-    if not camera.OutputFrameAndTestContinue('SolvePnP', frame, height=360):
+    if not camera.OutputFrameAndTestContinue('SolvePnP', frame, height=360)[0]:
       break
 
 

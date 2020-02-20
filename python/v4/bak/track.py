@@ -536,7 +536,7 @@ class ObjectTracker(object):
     # Should be +ve if robot is to the left of camera.
     self.camera_to_robot_yaw = 0 #-10 * np.pi / 180
     # Offset vector: vector from camera origin to robot origin.
-    self.camera_to_robot_vec = (0, 10, 5)
+    self.camera_to_robot_vec = (0, 10, 0)
 
 
   def Track(self, frame):
@@ -846,79 +846,49 @@ class Ball(object):
     self.t = -1  # -ve value => Simulation has not started.
 
   
-  def StartSimulation(self, speed, tracker, max_secs=2.0, max_z_from_back=50.0):
-    # Sim state. In 2D space (z-y). z:horizontal, y:vertical.
+  def StartSimulation(self, speed, tracker, max_secs):
     # Negative sin(theta) and g, since y points downward in our case.
     theta = tracker.robot_pitch * np.pi / 180
-    self.vel = speed * np.array((np.cos(theta), -np.sin(theta)))
-    self.pos = np.array((0.0, 0.0))
-    self.t = 0
-    self.entered_front = False
-    self.entered_back = False
-
-    # Mapping to 3D space.
+    launch_dir = np.array((np.cos(theta), -np.sin(theta)))
+    self.u, self.v = speed * launch_dir
     self.origin = tracker.rob_origin
     # Make sure horizontal orientation is in x-z plane.
     self.horz_dir = tracker.rob_orient * (1, 0, 1)
     self.horz_dir = self.horz_dir / max(0.0001, np.linalg.norm(self.horz_dir))
     self.vert_dir = np.array((0, 1, 0))
-
-    # Sim params.
+    self.position = self.origin
+    self.t = 0
     self.t_max = max_secs
-    self.max_z = tracker.hexagon.z_back + max_z_from_back
-    self.step_tolerance = 0.1  # Inches. Desired max motion during sim steps.
+    self.entered_front = False
+    self.entered_back = False
 
 
-  def Simulate(self, tracker, step_fps_frac=0.1):
+  def Simulate(self, tracker, step_frac=0.1):
     if self.t < 0:
       return
-   
-    def sim_step(pos, vel, dt):
-      z = pos[0] + vel[0] * dt
-      y = pos[1] + vel[1] * dt - 0.5 * self.g * dt * dt
-      u = vel[0]
-      v = vel[1] - self.g * dt
-      return (z,y), (u,v)
+    self.t += 1.0 / self.fps * step_frac
 
-    def update_entering_state(prev_pos, curr_pos):
-      x0, y0, z0 = tuple(self.Position3D(prev_pos))
-      x1, y1, z1 = tuple(self.Position3D(curr_pos))
-      if not self.entered_front:
-        if z0 < 0 and z1 >= 0:
-          if np.linalg.norm((x1, y1)) <= tracker.r_clear_front:
-            self.entered_front = True
-      if self.entered_front and not self.entered_back:
-        if z0 < tracker.hexagon.z_back and z1 >= tracker.hexagon.z_back:
-          if np.linalg.norm((x1, y1)) <= tracker.r_clear_back:
-            self.entered_back = True
+    z = self.u * self.t
+    y = self.v * self.t - 0.5 * self.g * self.t * self.t
 
-    # Total time step covered in this call.
-    total_step = 1.0 / self.fps * step_fps_frac
+    prev_position = self.position
+    self.position = self.origin + z * self.horz_dir + y * self.vert_dir
 
-    # Size of intermediate time steps. Smaller than total, so we can detect
-    # target plane corssings reliably. Only need this at crossings.
-    interim_step = total_step
-    speed = np.linalg.norm(self.vel)
-    if speed > 0:
-      interim_step = min(total_step, self.step_tolerance/speed)
-
-    dt = 0
-    pos, vel = self.pos, self.vel
-    while dt < total_step:
-      prev_pos = pos
-      pos, vel = sim_step(pos, vel, interim_step)
-      update_entering_state(prev_pos, pos)
-      dt += interim_step
-
-    self.pos = pos
-    self.vel = vel
-    self.t += dt
-    if self.t >= self.t_max or self.Position3D(self.pos)[2] > self.max_z:
+    if self.t >= self.t_max:
       self.t = -1
+    
+    x0, y0, z0 = tuple(prev_position)
+    x1, y1, z1 = tuple(self.position)
 
+    if not self.entered_front:
+      if z0 < 0 and z1 >= 0:
+        if np.linalg.norm((x1, y1)) <= tracker.r_clear_front:
+          self.entered_front = True
 
-  def Position3D(self, pos):
-    return self.origin + pos[0] * self.horz_dir + pos[1] * self.vert_dir
+    if self.entered_front and not self.entered_back:
+      if z0 < tracker.hexagon.z_back and z1 >= tracker.hexagon.z_back:
+        if np.linalg.norm((x1, y1)) <= tracker.r_clear_back:
+          self.entered_back = True
 
 
   def Draw(self, tracker, frame):
@@ -931,17 +901,16 @@ class Ball(object):
       color = (255, 0, 255)
     else:
       color = (0, 255, 255)
-    
-    position = self.Position3D(self.pos)
-    if position[2] > tracker.hexagon.z_back:
+
+    if self.position[2] > tracker.hexagon.z_back:
       intensity = 0.6
-    elif position[2] > 0:
+    elif self.position[2] > 0:
       intensity = 0.8
     else:
       intensity = 1.0
     color = tuple([int(x * intensity) for x in color])
       
-    DrawProjectedCircle(position,
+    DrawProjectedCircle(self.position,
                         tracker.r_ball,
                         tracker.rvec,
                         tracker.tvec,
@@ -949,6 +918,7 @@ class Ball(object):
                         frame,
                         color,
                         -1)
+
 
 
 
@@ -1025,17 +995,31 @@ def main():
 
     if startSim and tracker.trackingSuccess:
       ball = Ball()
-      ball.StartSimulation(310.0, tracker)
+      ball.StartSimulation(310.0, tracker, max_secs=1.2)
       while ball.t >= 0:
         sim_frame = frame.copy()
-        ball.Simulate(tracker, 0.1)
+        ball.Simulate(tracker, 0.05)
         ball.Draw(tracker, sim_frame)
-        # ShowFrame doesn't output to file.
+        # Show frame shouldn't output to file.
         if not cb.ShowFrameAndTestContinue('Output', sim_frame)[0]:
           break
       startSim = False
+    """
+    if tracker.trackingSuccess:
+      if nFrames % 50 == 0:
+        # Add new ball to simulation.
+        balls.append(Ball())
+        balls[-1].StartSimulation(300.0, tracker, max_secs=5.0)
+      for ball in balls:
+        # Simulate all balls.
+        ball.Simulate(tracker)
+        ball.Draw(tracker, frame)
+      # Remove balls that stopped simulating.
+      balls = [x for x in balls if x.t >= 0]
+    """
     
     nFrames += 1
+      
 
 
 
