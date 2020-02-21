@@ -511,6 +511,7 @@ class ObjectTracker(object):
     self.cam_orient = None
     self.rob_origin = None
     self.rob_orient = None
+    self.launch_data = None
     
     # Radius of ball
     self.r_ball = 3.5 # Inches.
@@ -534,7 +535,7 @@ class ObjectTracker(object):
     self.robot_pitch = 42.0  # In degrees.
     # Yaw (in radians): angle from camera orientation to robot orientation.
     # Should be +ve if robot is to the left of camera.
-    self.camera_to_robot_yaw = 0 #-10 * np.pi / 180
+    self.camera_to_robot_yaw = 0  # -10 * np.pi / 180
     # Offset vector: vector from camera origin to robot origin.
     self.camera_to_robot_vec = (0, 10, 5)
 
@@ -706,10 +707,15 @@ class ObjectTracker(object):
     # 0: Current orientation
     # 1: Orient towards front target (hexagon)
     # 2: Orient towards back target (circle)
-    launch_data = [{}, {}, {}]
-    launch_data[0] = {'orient': self.rob_orient, 'angle': 0}
-    launch_data[1] = {'orient': rob_to_front, 'angle': -yaw_front * 180/np.pi}
-    launch_data[2] = {'orient': rob_to_back, 'angle': -yaw_back * 180/np.pi}
+    #
+    #
+    # Angles are alignment angles by which to turn the robot to aim for the
+    # front and back targets in degrees.
+    # Change sign of yaw angle, so left turn is -ve and right turn is +ve.
+    self.launch_data = [{}, {}, {}]
+    self.launch_data[0] = {'orient': self.rob_orient, 'angle': 0}
+    self.launch_data[1] = {'orient': rob_to_front, 'angle': -yaw_front * 180/np.pi}
+    self.launch_data[2] = {'orient': rob_to_back, 'angle': -yaw_back * 180/np.pi}
 
     # Determine the "ball plane" and viability for each of the three
     # orientations: current, towards-front-center, towards-back-center.
@@ -718,16 +724,14 @@ class ObjectTracker(object):
     # Speed: 2 floats (front target speed, back target speed) if viable.
     for i in range(3):
       points, viable, speeds = self.ComputeBallPlaneAndSpeed(
-          launch_data[i]['orient'], self.rob_origin)
-      launch_data[i].update(
+          self.launch_data[i]['orient'], self.rob_origin)
+      self.launch_data[i].update(
           {'points': points, 'viable': viable, 'speeds': speeds})
-
-    # Robot alignment angles for front and back target.
-    # Change sign of yaw angle, so left turn is -ve and right turn is +ve.
-    self.angle_front = -yaw_front * 180 / np.pi
-    self.angle_back = -yaw_back * 180 / np.pi
-    sd.putNumber('AngleFrontPort', self.angle_front)
-    sd.putNumber('AngleBackPort', self.angle_back)
+    
+    # Write to network tables.
+    # TODO: Add speed and any other info.
+    sd.putNumber('AngleFrontPort', self.launch_data[1]['angle'])
+    sd.putNumber('AngleBackPort', self.launch_data[2]['angle'])
     sd.putBoolean('TrackingSuccess', self.trackingSuccess)
 
     if frame is not None:
@@ -753,7 +757,7 @@ class ObjectTracker(object):
       for i in range(3):
         name = names[i] + ' '
         color = colors[i]
-        data = launch_data[i]
+        data = self.launch_data[i]
         angle_text = name + ' ' + str(int(data['angle'] * 100) / 100)
         viable = data['viable']
         viable_text = [n + ('OK' if x else '__') for n,x in zip(['F ','B '], viable)]
@@ -846,7 +850,21 @@ class Ball(object):
     self.t = -1  # -ve value => Simulation has not started.
 
   
-  def StartSimulation(self, speed, tracker, max_secs=2.0, max_z_from_back=50.0):
+  def StartSimulation(self,
+                      speed,
+                      tracker,
+                      launch_index, # 0:curr, 1:front, 2:back
+                      max_secs=2.0,
+                      max_z_from_back=50.0):
+    # Check if we have valid robot orientation to start sim.
+    launch_orient = None
+    if tracker.launch_data is not None:
+      if len(tracker.launch_data) == 3:
+        launch_orient = tracker.launch_data[launch_index].get('orient')
+    if launch_orient is None:
+      print('Cannot start simulation. Launch orientation not known.')
+      return
+
     # Sim state. In 2D space (z-y). z:horizontal, y:vertical.
     # Negative sin(theta) and g, since y points downward in our case.
     theta = tracker.robot_pitch * np.pi / 180
@@ -859,7 +877,7 @@ class Ball(object):
     # Mapping to 3D space.
     self.origin = tracker.rob_origin
     # Make sure horizontal orientation is in x-z plane.
-    self.horz_dir = tracker.rob_orient * (1, 0, 1)
+    self.horz_dir = launch_orient * (1, 0, 1)
     self.horz_dir = self.horz_dir / max(0.0001, np.linalg.norm(self.horz_dir))
     self.vert_dir = np.array((0, 1, 0))
 
@@ -992,8 +1010,6 @@ def main():
   camera = cb.CameraSource(videoSource, calib.imageHeight, outputFile)
 
   tracker = ObjectTracker(calib)
-  balls = []
-  startSim = False
 
   nFrames = 0
   while True:
@@ -1019,21 +1035,26 @@ def main():
     if not ret:
       break;
 
-    # Run simulation if key is character 'b' 
-    if key == 98:
-      startSim = True
+    # Run simulation with different orientations depending on key pressed.
+    simIndex = -1
+    if key == 99:   # 'c' (current)
+      simIndex = 0
+    if key == 102:  # 'f' (front)
+      simIndex = 1
+    if key == 98:   # 'b' (back)
+      simIndex = 2
 
-    if startSim and tracker.trackingSuccess:
+    if simIndex >= 0 and tracker.trackingSuccess:
       ball = Ball()
-      ball.StartSimulation(310.0, tracker)
+      ball.StartSimulation(310.0, tracker, simIndex)
       while ball.t >= 0:
         sim_frame = frame.copy()
         ball.Simulate(tracker, 0.1)
         ball.Draw(tracker, sim_frame)
         # ShowFrame doesn't output to file.
-        if not cb.ShowFrameAndTestContinue('Output', sim_frame)[0]:
+        #if not cb.ShowFrameAndTestContinue('Output', sim_frame)[0]:
+        if not camera.OutputFrameAndTestContinue('Output', sim_frame)[0]:
           break
-      startSim = False
     
     nFrames += 1
 
