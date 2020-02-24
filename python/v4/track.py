@@ -9,22 +9,6 @@ from networktables import NetworkTables
 
 sd = NetworkTables.getTable('SmartDashboard')
 
-def GetEdgeImage(frame):
-  gaussian = cv2.GaussianBlur(frame, (7, 7), 0)
-  gray = cv2.cvtColor(gaussian, cv2.COLOR_BGR2GRAY) 
-  kernel = np.ones((5, 5), np.uint8) 
-
-  lower = 80
-  upper = 160
-  canny0 = cv2.Canny(gaussian[:,:,0], lower, upper)
-  canny1 = cv2.Canny(gaussian[:,:,1], lower, upper)
-  canny2 = cv2.Canny(gaussian[:,:,2], lower, upper)
-  canny = np.maximum(canny0, np.maximum(canny1, canny2))
-  canny = cv2.dilate(canny, kernel, iterations=1)
-  canny = cv2.erode(canny, kernel, iterations=1)
-  return gray, canny
-  
-
 # Assume indexed contour for all functions here.
 def max_x(contour):
   return max(contour, key=lambda ic: ic[1][0])
@@ -128,7 +112,57 @@ def DrawPolygon(polygon,
                   0.5 * draw_index_scale, (0, 0, 0))
   
 
-def DrawProjectedCircle(center, radius, rvec, tvec, calib, frame, color, thickness=2):
+def DrawProjectedSphere(center, radius, rvec, tvec, calib, frame, color, thickness=2):
+  def world2cam(point):
+    T = np.squeeze(tvec)
+    R, _ = cv2.Rodrigues(rvec)
+    return np.matmul(R, point) + T
+  
+  # Normalized vector from camera center to sphere center.
+  axis = world2cam(center)
+  axis_norm = np.linalg.norm(axis)
+  if axis_norm <= radius:
+    print('Sphere too close to camera')
+    return
+  axis = axis / axis_norm
+  center = world2cam(center)
+
+  # Projected circle will lie in plane perpendicular to axis. Decide upon an
+  # arbitrary "x-axis" and "y-axis" in this plane.
+  arbit_pt = np.array((1, 1, 1))
+  arbit_pt[np.squeeze(np.argmax(axis))] = 0
+  arbit_pt = arbit_pt / np.linalg.norm(arbit_pt)
+  x_axis = np.cross(arbit_pt, axis)
+  x_axis = x_axis / np.linalg.norm(x_axis)
+  y_axis = np.cross(x_axis, axis)
+  y_axis = y_axis / np.linalg.norm(y_axis)
+
+  # Radius of projected circle:
+  # r = r * cos(alpha)
+  # where alpha is angle between axis and camera-z (0, 0, 1).
+  # cos(alpha) = axis.dot((0, 0, 1)) = axis[2]
+  radius = radius * axis[2]
+
+  # Sample points on circle.
+  npts = 12
+  points = []
+  for i in range(npts):
+    theta = i * 2 * np.pi / npts
+    pt = center + radius * (x_axis * np.cos(theta) + y_axis * np.sin(theta))
+    points.append(pt)
+  points = np.asarray(points, np.float32)
+
+  # Project to image plane. Use rvec and tvec of 0 since we already converted
+  # to camera coordinates.
+  points, _ = cv2.projectPoints(
+        points, (0, 0, 0), (0, 0, 0), calib.cameraMatrix, calib.distCoeffs)
+
+  # Fit and draw ellipse.
+  box = cv2.fitEllipse(points)
+  cv2.ellipse(frame, box, color, thickness)
+
+
+def DrawProjectedCircleInXYPlane(center, radius, rvec, tvec, calib, frame, color, thickness=2):
   # Sample points on circle.
   npts = 12
   points = []
@@ -535,13 +569,33 @@ class ObjectTracker(object):
     self.robot_pitch = 42.0  # In degrees.
     # Yaw (in radians): angle from camera orientation to robot orientation.
     # Should be +ve if robot is to the left of camera.
-    self.camera_to_robot_yaw = 0  # -10 * np.pi / 180
+    self.camera_to_robot_yaw = 0 #-10 * np.pi / 180
     # Offset vector: vector from camera origin to robot origin.
     self.camera_to_robot_vec = (0, 10, 5)
 
 
   def Track(self, frame):
-    gray, edges = GetEdgeImage(frame)
+    gray, edges = self.GetEdgeImage(frame)
+    self.TrackFromEdges(edges, gray, frame)
+    return gray, edges
+
+
+  def GetEdgeImage(self, frame):
+    gaussian = cv2.GaussianBlur(frame, (7, 7), 0)
+    gray = cv2.cvtColor(gaussian, cv2.COLOR_BGR2GRAY) 
+    kernel = np.ones((5, 5), np.uint8) 
+    lower = 80
+    upper = 160
+    canny0 = cv2.Canny(gaussian[:,:,0], lower, upper)
+    canny1 = cv2.Canny(gaussian[:,:,1], lower, upper)
+    canny2 = cv2.Canny(gaussian[:,:,2], lower, upper)
+    canny = np.maximum(canny0, np.maximum(canny1, canny2))
+    canny = cv2.dilate(canny, kernel, iterations=1)
+    canny = cv2.erode(canny, kernel, iterations=1)
+    return gray, canny
+
+
+  def TrackFromEdges(self, edges, gray, frame):
     # Extract contours
     contours, hierarchy = cv2.findContours(edges, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_SIMPLE)
     # Only keep closed ones.
@@ -569,7 +623,7 @@ class ObjectTracker(object):
     self.ComputeCameraAndRobotState()
     self.ComputeLaunchData(frame)
     
-    return gray, edges
+    return
 
 
   def ExtractPolygon(self, contour):
@@ -597,13 +651,13 @@ class ObjectTracker(object):
     # Draw projection of original targets.
     if frame is not None and self.rvec is not None and self.tvec is not None:
       # Draw back circle.
-      DrawProjectedCircle((0.0, 0.0, self.hexagon.z_back),
-                          self.hexagon.r_back,
-                          self.rvec,
-                          self.tvec,
-                          self.calib,
-                          frame,
-                          (0, 0, 255))
+      DrawProjectedCircleInXYPlane((0.0, 0.0, self.hexagon.z_back),
+                                   self.hexagon.r_back,
+                                   self.rvec,
+                                   self.tvec,
+                                   self.calib,
+                                   frame,
+                                   (0, 0, 255))
 
       # Draw projections of hexagon target points.
       hexagon, _ = cv2.projectPoints(self.hexagon.points3d,
@@ -736,20 +790,20 @@ class ObjectTracker(object):
 
     if frame is not None:
       # Clearance circles.
-      DrawProjectedCircle((0.0, 0.0, 0.0),
-                          self.r_clear_front,
-                          self.rvec,
-                          self.tvec,
-                          self.calib,
-                          frame,
-                          (255, 0, 255)) 
-      DrawProjectedCircle((0.0, 0.0, self.hexagon.z_back),
-                          self.r_clear_back,
-                          self.rvec,
-                          self.tvec,
-                          self.calib,
-                          frame,
-                          (0, 127, 255)) 
+      DrawProjectedCircleInXYPlane((0.0, 0.0, 0.0),
+                                   self.r_clear_front,
+                                   self.rvec,
+                                   self.tvec,
+                                   self.calib,
+                                   frame,
+                                   (255, 0, 255)) 
+      DrawProjectedCircleInXYPlane((0.0, 0.0, self.hexagon.z_back),
+                                   self.r_clear_back,
+                                   self.rvec,
+                                   self.tvec,
+                                   self.calib,
+                                   frame,
+                                   (0, 127, 255)) 
 
       # Ball plane intersection with target plane.
       colors = [(255, 0, 0), (255, 0, 255), (0, 127, 255)]
@@ -914,7 +968,8 @@ class Ball(object):
     total_step = 1.0 / self.fps * step_fps_frac
 
     # Size of intermediate time steps. Smaller than total, so we can detect
-    # target plane corssings reliably. Only need this at crossings.
+    # target plane corssings reliably. Only need this at crossings but doing
+    # it for the entire simulation for simplicity.
     interim_step = total_step
     speed = np.linalg.norm(self.vel)
     if speed > 0:
@@ -959,7 +1014,7 @@ class Ball(object):
       intensity = 1.0
     color = tuple([int(x * intensity) for x in color])
       
-    DrawProjectedCircle(position,
+    DrawProjectedSphere(position,
                         tracker.r_ball,
                         tracker.rvec,
                         tracker.tvec,
