@@ -139,9 +139,9 @@ def DrawProjectedSphere(center, radius, rvec, tvec, calib, frame, color, thickne
 
   # Radius of projected circle:
   # r = r * cos(alpha)
-  # where alpha is angle between axis and camera-z (0, 0, 1).
-  # cos(alpha) = axis.dot((0, 0, 1)) = axis[2]
-  radius = radius * axis[2]
+  # where alpha is angle between axis (vector to center) and vector to tangent
+  # to sphere. Hence sin(alpha) = R/L. cos(alpha) = sqrt(1-R^2/L^2)
+  radius = radius * np.sqrt(1 - radius * radius / (axis_norm * axis_norm))
 
   # Sample points on circle.
   npts = 12
@@ -569,9 +569,9 @@ class ObjectTracker(object):
     self.robot_pitch = 42.0  # In degrees.
     # Yaw (in radians): angle from camera orientation to robot orientation.
     # Should be +ve if robot is to the left of camera.
-    self.camera_to_robot_yaw = 0 #-10 * np.pi / 180
+    self.camera_to_robot_yaw = -10 * np.pi / 180
     # Offset vector: vector from camera origin to robot origin.
-    self.camera_to_robot_vec = (0, 10, 5)
+    self.camera_to_robot_vec = (20, 10, 5)
 
 
   def Track(self, frame):
