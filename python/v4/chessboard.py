@@ -4,6 +4,8 @@ import numpy as np
 import os
 import time
 
+from videocaptureasync import VideoCaptureAsync
+
 
 def ShowFrameAndTestContinue(message, frame, height=None):
   if height is not None:
@@ -39,15 +41,27 @@ class VideoWriter(object):
 
 
 class CameraSource(object):
-  def __init__(self, cameraSource, height, output_file=None, startFrame=0):
-    self.camera = cv2.VideoCapture(cameraSource)
-    self.ORIGINAL_WIDTH = int(self.camera.get(cv2.CAP_PROP_FRAME_WIDTH))
-    self.ORIGINAL_HEIGHT = int(self.camera.get(cv2.CAP_PROP_FRAME_HEIGHT))
+  def __init__(self, cameraSource, height, output_file=None, startFrame=0,
+               async_read=False):
+    if async_read:
+      self.camera = VideoCaptureAsync(cameraSource)
+      self.ORIGINAL_WIDTH = self.camera.width
+      self.ORIGINAL_HEIGHT = self.camera.height
+    else:
+      self.camera = cv2.VideoCapture(cameraSource)
+      self.ORIGINAL_WIDTH = int(self.camera.get(cv2.CAP_PROP_FRAME_WIDTH))
+      self.ORIGINAL_HEIGHT = int(self.camera.get(cv2.CAP_PROP_FRAME_HEIGHT))
     self.HEIGHT = min(self.ORIGINAL_HEIGHT, height)
     self.WIDTH = int(self.ORIGINAL_WIDTH * self.HEIGHT / self.ORIGINAL_HEIGHT)
+    #self.camera.set(cv2.CAP_PROP_FRAME_WIDTH, self.WIDTH)
+    #self.camera.set(cv2.CAP_PROP_FRAME_HEIGHT, self.HEIGHT)
+
     self.startFrame = startFrame
     self.nFrames = 0
     self.writer = VideoWriter(output_file)
+
+    if async_read:
+      self.camera.start()
 
 
   def GetFrame(self):  
@@ -56,9 +70,9 @@ class CameraSource(object):
       # Skip some frames if requested.
       if self.startFrame > 0:
         skippedFrames = 0
-        while self.camera.isOpened():
+        while True:
           ret, frame = self.camera.read()
-          if frame is None:
+          if not ret or frame is None:
             print('No more frames')
             return None
           skippedFrames += 1
@@ -69,14 +83,13 @@ class CameraSource(object):
 
     # Get frame.
     frame = None
-    if self.camera.isOpened():
-      frameTime = time.time() 
-      if self.nFrames > 0 and self.nFrames % 50 == 0:
-        print('FPS: ', self.nFrames / (frameTime - self.startTime))
-      self.nFrames += 1
-      ret, frame = self.camera.read()
-      if frame is not None:
-        frame = cv2.resize(frame, (self.WIDTH, self.HEIGHT))
+    frameTime = time.time() 
+    if self.nFrames > 0 and self.nFrames % 50 == 0:
+      print('FPS: ', self.nFrames / (frameTime - self.startTime))
+    self.nFrames += 1
+    ret, frame = self.camera.read()
+    if ret and frame is not None:
+      frame = cv2.resize(frame, (self.WIDTH, self.HEIGHT))
     return frame
 
 
@@ -128,6 +141,7 @@ class Calibration(object):
                imageHeight,
                maxSamples,
                startFrame=0):
+    self.calibFileHeight = imageHeight
     self.imageHeight = imageHeight
     self.calibVideo = calibVideo
     self.maxSamples = maxSamples
@@ -139,13 +153,17 @@ class Calibration(object):
     self.cameraMatrix = None
     self.distCoeffs = None
 
+
   def Id(self):
     return str(self.imageHeight) + '-' + str(self.maxSamples)
+
 
   def PrintInfo(self):
     print('Calibration files:')
     print(self.calibFileCam)
     print(self.calibFileDist)
+    print('Calib file image height', self.calibFileHeight)
+    print('Calib matrix image height', self.imageHeight)
     if self.hasCalib:
       print('CameraMatrix:\n', self.cameraMatrix)
       print('DistCoeffs:\n', self.distCoeffs)
@@ -153,7 +171,7 @@ class Calibration(object):
       print('Calibration not loaded or computed.')
 
 
-  def LoadFromFile(self):
+  def LoadFromFile(self, finalImageHeight):
     if self.hasCalib:
       return True
     
@@ -171,6 +189,7 @@ class Calibration(object):
           self.hasCalib = True
           print('Loaded successfully.')
           self.PrintInfo()
+          self._RecomputeForNewSize(finalImageHeight)
           return True
 
     # Failed to read.
@@ -185,10 +204,11 @@ class Calibration(object):
                     squareWidth=None,
                     rows=None,
                     cols=None,
-                    forceRecompute=False):
+                    forceRecompute=False,
+                    finalImageHeight=None):
     if forceRecompute:
       print('Forcing recomputation of calibration data.')
-    elif self.LoadFromFile():
+    elif self.LoadFromFile(finalImageHeight):
       return True
 
     if squareWidth == None or rows == None or cols == None:
@@ -200,7 +220,7 @@ class Calibration(object):
     imagePoints = []
  
     camera = CameraSource(
-        self.calibVideo, self.imageHeight, startFrame=self.startFrame)
+        self.calibVideo, self.calibFileHeight, startFrame=self.startFrame)
     chess = Chessboard(squareWidth, rows, cols)
  
     print('Extracting frames for calibration.')
@@ -235,14 +255,29 @@ class Calibration(object):
     _, self.cameraMatrix, self.distCoeffs, _, _ = cv2.calibrateCamera(
         objectPoints, imagePoints, camera.ImageSize(), None, None) 
     self.hasCalib = True
-    
+   
     self.PrintInfo()
     print('Saving camera matrix to: ', self.calibFileCam)
     print('Saving distortion coeffs to: ', self.calibFileDist)
     np.savetxt(self.calibFileCam, self.cameraMatrix)
     np.savetxt(self.calibFileDist, self.distCoeffs)
     print('Done.')
+
+    self._RecomputeForNewSize(finalImageHeight)
+
     return True
+
+
+  def _RecomputeForNewSize(self, imageHeight):
+    if imageHeight is None or not self.hasCalib:
+      return
+    if imageHeight == self.imageHeight:
+      return
+    self.cameraMatrix *= imageHeight / self.imageHeight
+    self.imageHeight = imageHeight
+    print('Updated calibration to new height', imageHeight)
+    self.PrintInfo()
+
 
 
 class CoordinateFrame(object):
@@ -305,7 +340,8 @@ def RunPoseEstimation(video, outputDir, calib, chess):
 
 def main():
   #camera = 'pixel2'  
-  camera = 'raspi'
+  #camera = 'raspi'
+  camera = 'logitech'
   imageHeight = 720
 
   dataDir = '/Users/kwatra/Home/pvt/robotx/RobotX2020VisionSystem/data'
@@ -326,6 +362,13 @@ def main():
     rows = 6
     cols = 9
     startFrame = 65
+  elif camera == 'logitech':
+    calibVideo = os.path.join(calibDir, 'calib-logitech.mov')
+    maxSamples = 30
+    squareWidth = 8.5
+    rows = 6
+    cols = 9
+    startFrame = 0
   else:
     raise ValueError('Square width unkown for calib file: ', calibVideo)
   

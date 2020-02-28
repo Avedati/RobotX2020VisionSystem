@@ -569,9 +569,9 @@ class ObjectTracker(object):
     self.robot_pitch = 42.0  # In degrees.
     # Yaw (in radians): angle from camera orientation to robot orientation.
     # Should be +ve if robot is to the left of camera.
-    self.camera_to_robot_yaw = -10 * np.pi / 180
+    self.camera_to_robot_yaw = 0 #-10 * np.pi / 180
     # Offset vector: vector from camera origin to robot origin.
-    self.camera_to_robot_vec = (20, 10, 5)
+    self.camera_to_robot_vec = (0, 10, 5)  # (20, 10, 5)
 
 
   def Track(self, frame):
@@ -691,7 +691,9 @@ class ObjectTracker(object):
 
 
   def ComputeCameraAndRobotState(self):
-    """Computes camera and robot origin and orientation in world coordinates."""
+    """Computes camera and robot origin and orientation in world coordinates.
+    And target center in robot coordinates.
+    """
     if self.rvec is None or self.tvec is None:
       return
 
@@ -705,24 +707,37 @@ class ObjectTracker(object):
     cam_origin = cam2world(np.zeros((3,)))
     cam_orient = cam2world(np.asarray([0, 0, 1])) - cam_origin
 
-    # Robot orientation in world coordinates:
+    # Robot orientation (z-vector) in world coordinates:
     # Project to x-z plane and apply camera to robot rotation about y-axis.
     x, _, z = tuple(cam_orient)
     yaw = self.camera_to_robot_yaw
-    rob_orient = np.array((x * np.cos(yaw) - z * np.sin(yaw), 0,
-                           x * np.sin(yaw) + z * np.cos(yaw)))
-    rob_norm = np.linalg.norm(rob_orient)
+    rob_z = np.array((x * np.cos(yaw) - z * np.sin(yaw), 0,
+                      x * np.sin(yaw) + z * np.cos(yaw)))
+    rob_norm = np.linalg.norm(rob_z)
     if rob_norm > 0:
-      rob_orient = rob_orient / rob_norm
+      rob_z = rob_z / rob_norm
+    # Robot y-vector is same as world-y. x-vector is normal to both.
+    # rob_z:(x,0,z) maps to rob_x:(z,0,-x)
+    rob_y = np.array((0, 1, 0))
+    rob_x = np.array((rob_z[2], 0, -rob_z[0]))
 
     # Robot origin in world coords.
     rob_origin = cam_origin + self.camera_to_robot_vec
+
+    # Front target (world origin == hexagon center) in robot coords.
+    #
+    # Same as projection of robot_to_target vector to robot coordinate system.
+    target_front = np.array((0, 0, 0))
+    rob_to_tgt_w = target_front - rob_origin
+    rob_to_tgt_r = np.array((np.dot(rob_to_tgt_w, rob_x), rob_to_tgt_w[2],
+                             np.dot(rob_to_tgt_w, rob_z)))
 
     # Update state.
     self.cam_origin = cam_origin
     self.cam_orient = cam_orient
     self.rob_origin = rob_origin
-    self.rob_orient = rob_orient
+    self.rob_orient = rob_z
+    self.target_in_robot_coords = rob_to_tgt_r
 
 
   def ComputeLaunchData(self, frame=None):
@@ -1028,7 +1043,7 @@ class Ball(object):
 def main():
   camera = 'pixel2'  
   #camera = 'raspi'
-  imageHeight = 720
+  imageHeight = 360
   liveFeed = False
 
   dataDir = '/Users/kwatra/Home/pvt/robotx/RobotX2020VisionSystem/data'
@@ -1055,8 +1070,8 @@ def main():
   else:
     raise ValueError('Unknown camera type.')
 
-  calib = cb.Calibration(calibVideo, imageHeight, maxSamples)
-  if not calib.LoadOrCompute():
+  calib = cb.Calibration(calibVideo, 720, maxSamples)
+  if not calib.LoadOrCompute(finalImageHeight=imageHeight):
     print('Could not load or compute calibration.')
     return
 
