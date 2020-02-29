@@ -7,6 +7,7 @@ import time
 #from tests import *
 from networktables import NetworkTables
 
+# https://robotpy.readthedocs.io/en/stable/guide/nt.html#client-initialization-driver-station-coprocessor
 """
 import threading
 from networktables import NetworkTables
@@ -28,8 +29,6 @@ with cond:
     if not notified[0]:
         cond.wait()
 
-# Insert your processing code here
-print("Connected!")
 """
 
 sd = NetworkTables.getTable('SmartDashboard')
