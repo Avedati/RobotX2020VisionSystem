@@ -7,29 +7,6 @@ import time
 #from tests import *
 from networktables import NetworkTables
 
-# https://robotpy.readthedocs.io/en/stable/guide/nt.html#client-initialization-driver-station-coprocessor
-
-import threading
-from networktables import NetworkTables
-
-cond = threading.Condition()
-notified = [False]
-
-def connectionListener(connected, info):
-    print(info, '; Connected=%s' % connected)
-    with cond:
-        notified[0] = True
-        cond.notify()
-
-NetworkTables.initialize(server='10.69.62.2')
-NetworkTables.addConnectionListener(connectionListener, immediateNotify=True)
-
-with cond:
-    print("Waiting")
-    if not notified[0]:
-        cond.wait()
-
-simulate = True
 sd = NetworkTables.getTable('SmartDashboard')
 
 # Assume indexed contour for all functions here.
@@ -569,10 +546,9 @@ class ObjectTracker(object):
     self.rob_origin = None
     self.rob_orient = None
     self.launch_data = None
-
-    self.g = 32.1740 * 12  # In inches / second^2
-    self.launch_angle = 46 * np.pi / 180 # TODO: find a more precise angle.
-
+    self.gaussian = None
+    self.timing = {}
+    
     # Radius of ball
     self.r_ball = 3.5 # Inches.
     
@@ -592,11 +568,12 @@ class ObjectTracker(object):
     # Robot configuration.
     # TODO: Some of these should be computed as calibration between camera and
     # robot.
+    self.robot_pitch = 42.0  # In degrees.
     # Yaw (in radians): angle from camera orientation to robot orientation.
     # Should be +ve if robot is to the left of camera.
     self.camera_to_robot_yaw = -10 * np.pi / 180
     # Offset vector: vector from camera origin to robot origin.
-    self.camera_to_robot_vec = (20, 10, 5)  # (20, 10, 5)
+    self.camera_to_robot_vec = (20, 10, 5)
 
 
   def Track(self, frame):
@@ -619,6 +596,27 @@ class ObjectTracker(object):
     canny = cv2.erode(canny, kernel, iterations=1)
     return gray, canny
 
+  def GetEdgeImage2(self, frame):
+    if self.gaussian is None:
+      self.gaussian = np.empty(frame.shape, np.uint8)
+      self.gray = np.empty(frame.shape[0:2] + (1,), np.uint8)
+      self.canny0 = np.empty(frame.shape[0:2] + (1,), np.uint8)
+      self.canny1 = np.empty(frame.shape[0:2] + (1,), np.uint8)
+      self.canny2 = np.empty(frame.shape[0:2] + (1,), np.uint8)
+      self.canny = np.empty(frame.shape[0:2] + (1,), np.uint8)
+      
+    cv2.GaussianBlur(frame, (7, 7), 0, self.gaussian)
+    cv2.cvtColor(self.gaussian, cv2.COLOR_BGR2GRAY, self.gray)
+    kernel = np.ones((5, 5), np.uint8) 
+    lower = 80
+    upper = 160
+    cv2.Canny(self.gaussian[:,:,0], lower, upper, self.canny0)
+    cv2.Canny(self.gaussian[:,:,1], lower, upper, self.canny1)
+    cv2.Canny(self.gaussian[:,:,2], lower, upper, self.canny2)
+    self.canny = np.maximum(self.canny0, np.maximum(self.canny1, self.canny2))
+    cv2.dilate(self.canny, kernel, self.canny)
+    cv2.erode(self.canny, kernel, self.canny)
+    return self.gray, self.canny
 
   def TrackFromEdges(self, edges, gray, frame):
     # Extract contours
@@ -716,9 +714,7 @@ class ObjectTracker(object):
 
 
   def ComputeCameraAndRobotState(self):
-    """Computes camera and robot origin and orientation in world coordinates.
-    And target center in robot coordinates.
-    """
+    """Computes camera and robot origin and orientation in world coordinates."""
     if self.rvec is None or self.tvec is None:
       return
 
@@ -732,37 +728,24 @@ class ObjectTracker(object):
     cam_origin = cam2world(np.zeros((3,)))
     cam_orient = cam2world(np.asarray([0, 0, 1])) - cam_origin
 
-    # Robot orientation (z-vector) in world coordinates:
+    # Robot orientation in world coordinates:
     # Project to x-z plane and apply camera to robot rotation about y-axis.
     x, _, z = tuple(cam_orient)
     yaw = self.camera_to_robot_yaw
-    rob_z = np.array((x * np.cos(yaw) - z * np.sin(yaw), 0,
-                      x * np.sin(yaw) + z * np.cos(yaw)))
-    rob_norm = np.linalg.norm(rob_z)
+    rob_orient = np.array((x * np.cos(yaw) - z * np.sin(yaw), 0,
+                           x * np.sin(yaw) + z * np.cos(yaw)))
+    rob_norm = np.linalg.norm(rob_orient)
     if rob_norm > 0:
-      rob_z = rob_z / rob_norm
-    # Robot y-vector is same as world-y. x-vector is normal to both.
-    # rob_z:(x,0,z) maps to rob_x:(z,0,-x)
-    rob_y = np.array((0, 1, 0))
-    rob_x = np.array((rob_z[2], 0, -rob_z[0]))
+      rob_orient = rob_orient / rob_norm
 
     # Robot origin in world coords.
     rob_origin = cam_origin + self.camera_to_robot_vec
-
-    # Front target (world origin == hexagon center) in robot coords.
-    #
-    # Same as projection of robot_to_target vector to robot coordinate system.
-    target_front = np.array((0, 0, 0))
-    rob_to_tgt_w = target_front - rob_origin
-    rob_to_tgt_r = np.array((np.dot(rob_to_tgt_w, rob_x), rob_to_tgt_w[2],
-                             np.dot(rob_to_tgt_w, rob_z)))
 
     # Update state.
     self.cam_origin = cam_origin
     self.cam_orient = cam_orient
     self.rob_origin = rob_origin
-    self.rob_orient = rob_z
-    self.target_in_robot_coords = rob_to_tgt_r
+    self.rob_orient = rob_orient
 
 
   def ComputeLaunchData(self, frame=None):
@@ -853,15 +836,14 @@ class ObjectTracker(object):
         color = colors[i]
         data = self.launch_data[i]
         angle_text = name + ' ' + str(int(data['angle'] * 100) / 100)
-        speeds = ['' if s is None else str(int(s*100)/100) for s in data['speeds']]
         viable = data['viable']
-        viable_text = [n + (str(s) if v else '__') for n,v,s in zip(['F ','B '], viable, speeds)]
+        viable_text = [n + ('OK' if x else '__') for n,x in zip(['F ','B '], viable)]
         viable_color = [(0, 255, 0) if x else (0, 0, 255) for x in viable]
         cv2.putText(frame, angle_text, (10, 30*(i+1)), cv2.FONT_HERSHEY_SIMPLEX, 0.5,
                     color)
         cv2.putText(frame, viable_text[0], (200, 30*(i+1)), cv2.FONT_HERSHEY_SIMPLEX, 0.5,
                     viable_color[0])
-        cv2.putText(frame, viable_text[1], (300, 30*(i+1)), cv2.FONT_HERSHEY_SIMPLEX, 0.5,
+        cv2.putText(frame, viable_text[1], (260, 30*(i+1)), cv2.FONT_HERSHEY_SIMPLEX, 0.5,
                     viable_color[1])
 
         # Draw line from target "base" (same y-level as robot) to front aim.
@@ -876,17 +858,6 @@ class ObjectTracker(object):
         cv2.arrowedLine(frame, points[0], points[1], color, 2, tipLength=0.01)
         cv2.drawMarker(frame, points[2], color, cv2.MARKER_TILTED_CROSS, 10, 2)
 
-  def ComputeBallVelocity(self, distance_to_target, height_of_target):
-    if height_of_target < 0:
-      print('The height of the target relative to the robot is negative.')
-      return None
-    sec1 = distance_to_target/np.cos(self.launch_angle)
-    sqrtDen = distance_to_target*np.tan(self.launch_angle)-height_of_target
-    sec2 = self.g/(2.0*sqrtDen)
-    if sqrtDen <= 0:
-      print('It isn\'t possible for the projectile to go into the target.')
-      return None
-    return sec1 * np.sqrt(sec2)
 
   def ComputeBallPlaneAndSpeed(self, robot_to_target, rob_origin):
     """Determine the "ball plane" within which the ball will fly towards the
@@ -940,13 +911,8 @@ class ObjectTracker(object):
     viable_back = viable_front and abs(aim_back[0]) < self.r_clear_back
    
     # TODO: Compute speeds.
-    #velocity
-    height = rob_origin[1]
-    speeds = (None if not viable_front else self.ComputeBallVelocity(df, height),
-              None if not viable_back else self.ComputeBallVelocity(db, height))
-    viable_front = viable_front and speeds[0] is not None
-    viable_back = viable_back and speeds[1] is not None
-    
+    speeds = (0.0, 0.0)
+
     points = (base, aim_front, aim_back)
     viable = (viable_front, viable_back)
 
@@ -975,20 +941,10 @@ class Ball(object):
     if launch_orient is None:
       print('Cannot start simulation. Launch orientation not known.')
       return
-    speeds = tracker.launch_data[launch_index].get('speeds')
-    speed = -1
-    if speeds[1] is not None:
-      speed = speeds[1]
-    elif speeds[0] is not None:
-      speed = speeds[0]
-
-    if speed == -1:
-      print('No viable speed available')
-      return
 
     # Sim state. In 2D space (z-y). z:horizontal, y:vertical.
     # Negative sin(theta) and g, since y points downward in our case.
-    theta = tracker.launch_angle
+    theta = tracker.robot_pitch * np.pi / 180
     self.vel = speed * np.array((np.cos(theta), -np.sin(theta)))
     self.pos = np.array((0.0, 0.0))
     self.t = 0
@@ -1091,35 +1047,14 @@ class Ball(object):
                         -1)
 
 
-def RunSimulation(tracker, camera, frame, key):
-  # Run simulation with different orientations depending on key pressed.
-  simIndex = -1
-  if key == 99:   # 'c' (current)
-    simIndex = 0
-  if key == 102:  # 'f' (front)
-    simIndex = 1
-  if key == 98:   # 'b' (back)
-    simIndex = 2
-
-  if simIndex >= 0 and tracker.trackingSuccess:
-    ball = Ball()
-    ball.StartSimulation(310.0, tracker, simIndex)
-    while ball.t >= 0:
-      sim_frame = frame.copy()
-      ball.Simulate(tracker, 0.1)
-      ball.Draw(tracker, sim_frame)
-      # ShowFrame doesn't output to file.
-      #if not cb.ShowFrameAndTestContinue('Output', sim_frame)[0]:
-      if not camera.OutputFrameAndTestContinue('Output', sim_frame)[0]:
-        break
 
 def main():
   camera = 'pixel2'  
   #camera = 'raspi'
+  imageHeight = 360
   liveFeed = False
-  imageHeight = 720
 
-  dataDir = '/home/pi/RobotX2020VisionSystem/data'
+  dataDir = '/home/pi/RobotX2020VisionSystem/python/v4/data'
   #dataDir = '/Users/kwatra/Home/pvt/robotx/RobotX2020VisionSystem/data'
   calibDir = os.path.join(dataDir, 'calib_data')
   inputDir = os.path.join(dataDir, 'target_videos')
@@ -1144,14 +1079,14 @@ def main():
   else:
     raise ValueError('Unknown camera type.')
 
-  calib = cb.Calibration(calibVideo, 720, maxSamples)
-  if not calib.LoadOrCompute(finalImageHeight=imageHeight):
+  calib = cb.Calibration(calibVideo, imageHeight, maxSamples)
+  if not calib.LoadOrCompute():
     print('Could not load or compute calibration.')
     return
 
   outputFile = os.path.join(outputDir,
       os.path.basename(videoSource) + '-' + calib.Id() + '-tracked.mp4')
-  camera = cb.CameraSource(videoSource, calib.imageHeight, outputFile, outputToServer=True)
+  camera = cb.CameraSource(videoSource, calib.imageHeight, outputFile)
 
   tracker = ObjectTracker(calib)
 
@@ -1168,22 +1103,42 @@ def main():
       edges = np.stack((edges, edges, edges), axis=2)
       concat = np.concatenate((frame, gray), axis=0)
 
-    ret, key = camera.OutputFrameAndTestContinue('Output', frame)
-    #ret = True
     #key = 0
+    ret, key = camera.OutputFrameAndTestContinue('Output', frame)
 
-    #ret = True
+
+    ret = True
     #ret = ret and camera.OutputFrameAndTestContinue('Output', frame)
     #ret = ret and camera.OutputFrameAndTestContinue('Output', concat)
     #ret = ret and cb.ShowFrameAndTestContinue('Gray frame', gray)
     #ret = ret and cb.ShowFrameAndTestContinue('Frame', frame)
     #ret = ret and cb.ShowFrameAndTestContinue('Edges', edges)
     if not ret:
-      break;
+      break
 
-    if simulate:
-      RunSimulation(tracker, camera, frame, key)
+    # Run simulation with different orientations depending on key pressed.
+    simIndex = -1
+    if key == 99:   # 'c' (current)
+      simIndex = 0
+    if key == 102:  # 'f' (front)
+      simIndex = 1
+    if key == 98:   # 'b' (back)
+      simIndex = 2
+
+    if simIndex >= 0 and tracker.trackingSuccess:
+      ball = Ball()
+      ball.StartSimulation(310.0, tracker, simIndex)
+      while ball.t >= 0:
+        sim_frame = frame.copy()
+        ball.Simulate(tracker, 0.1)
+        ball.Draw(tracker, sim_frame)
+        # ShowFrame doesn't output to file.
+        #if not cb.ShowFrameAndTestContinue('Output', sim_frame)[0]:
+        if not camera.OutputFrameAndTestContinue('Output', sim_frame)[0]:
+          break
+    
     nFrames += 1
+
 
 
 if __name__ == '__main__':
