@@ -3,13 +3,12 @@ import cv2
 import math
 import numpy as np
 import os
+import threading
 import time
-#from tests import *
-from networktables import NetworkTables
 
 # https://robotpy.readthedocs.io/en/stable/guide/nt.html#client-initialization-driver-station-coprocessor
 
-import threading
+#Code for network tables setup.
 from networktables import NetworkTables
 
 cond = threading.Condition()
@@ -24,12 +23,12 @@ def connectionListener(connected, info):
 NetworkTables.initialize(server='10.69.62.2')
 NetworkTables.addConnectionListener(connectionListener, immediateNotify=True)
 
-with cond:
+def WaitForNetworkTableConnection():
+  with cond:
     print("Waiting")
     if not notified[0]:
-        cond.wait()
+      cond.wait()
 
-simulate = True
 sd = NetworkTables.getTable('SmartDashboard')
 
 # Assume indexed contour for all functions here.
@@ -302,7 +301,7 @@ class TargetObject(object):
 
     best_match = (matches[0][0]).astype(np.float32)
 
-    # Corener sub-pix.
+    # Corner sub-pix.
     window = 2 * int(2 * self.scale) + 1
     best_match = cv2.cornerSubPix(
         gray,
@@ -312,8 +311,8 @@ class TargetObject(object):
         (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 40, 0.001))
 
     # Only keep bottom contour.
-    img_pts = list(best_match)[0:]
-    obj_pts = list(self.points3d)[0:]
+    img_pts = list(best_match)
+    obj_pts = list(self.points3d)
 
     if frame is not None:
       # Draw all matches in overlay.
@@ -570,7 +569,7 @@ class ObjectTracker(object):
     self.rob_orient = None
     self.launch_data = None
 
-    self.g = 32.1740 * 12  # In inches / second^2
+    self.g = 32.1740 * 12 # In inches / second^2
     self.launch_angle = 46 * np.pi / 180 # TODO: find a more precise angle.
 
     # Radius of ball
@@ -594,9 +593,9 @@ class ObjectTracker(object):
     # robot.
     # Yaw (in radians): angle from camera orientation to robot orientation.
     # Should be +ve if robot is to the left of camera.
-    self.camera_to_robot_yaw = -10 * np.pi / 180
+    self.camera_to_robot_yaw = 0 # -10 * np.pi / 180
     # Offset vector: vector from camera origin to robot origin.
-    self.camera_to_robot_vec = (20, 10, 5)  # (20, 10, 5)
+    self.camera_to_robot_vec = (0, 0, 0) #(0, -5, -4.5) #(20, 10, 5)  # (20, 10, 5)
 
 
   def Track(self, frame):
@@ -622,7 +621,8 @@ class ObjectTracker(object):
 
   def TrackFromEdges(self, edges, gray, frame):
     # Extract contours
-    _, contours, hierarchy = cv2.findContours(edges, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_SIMPLE)
+    contours, hierarchy = cv2.findContours(edges, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_SIMPLE)
+    #_, contours, hierarchy = cv2.findContours(edges, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_SIMPLE)
     # Only keep closed ones.
     #contours = [c for c,h in zip(contours, np.squeeze(hierarchy)) if h[2] >= 0 or h[3] < 0]
     
@@ -643,6 +643,10 @@ class ObjectTracker(object):
       if hex_pts is not None:
         img_pts = hex_pts[0]
         obj_pts = hex_pts[1]
+        print('Detected hexagon instead of tape')
+
+    self.img_pts = img_pts
+    self.obj_pts = obj_pts
 
     self.RunPoseEstimationTarget(img_pts, obj_pts, frame)
     self.ComputeCameraAndRobotState()
@@ -754,7 +758,8 @@ class ObjectTracker(object):
     # Same as projection of robot_to_target vector to robot coordinate system.
     target_front = np.array((0, 0, 0))
     rob_to_tgt_w = target_front - rob_origin
-    rob_to_tgt_r = np.array((np.dot(rob_to_tgt_w, rob_x), rob_to_tgt_w[2],
+    rob_to_tgt_r = np.array((np.dot(rob_to_tgt_w, rob_x),
+                             np.dot(rob_to_tgt_w, rob_y),
                              np.dot(rob_to_tgt_w, rob_z)))
 
     # Update state.
@@ -763,6 +768,7 @@ class ObjectTracker(object):
     self.rob_origin = rob_origin
     self.rob_orient = rob_z
     self.target_in_robot_coords = rob_to_tgt_r
+    print(tvec, cam_origin, rob_origin, cam_orient, rob_z, rob_to_tgt_r, rob_to_tgt_w)
 
 
   def ComputeLaunchData(self, frame=None):
@@ -1005,7 +1011,7 @@ class Ball(object):
     # Sim params.
     self.t_max = max_secs
     self.max_z = tracker.hexagon.z_back + max_z_from_back
-    self.step_tolerance = 0.1  # Inches. Desired max motion during sim steps.
+    self.step_tolerance = 0.1 # Inches. Desired max motion during sim steps.
 
 
   def Simulate(self, tracker, step_fps_frac=0.1):
@@ -1091,7 +1097,7 @@ class Ball(object):
                         -1)
 
 
-def RunSimulation(tracker, camera, frame, key):
+def RunSimulation(tracker, capture, frame, key):
   # Run simulation with different orientations depending on key pressed.
   simIndex = -1
   if key == 99:   # 'c' (current)
@@ -1110,17 +1116,60 @@ def RunSimulation(tracker, camera, frame, key):
       ball.Draw(tracker, sim_frame)
       # ShowFrame doesn't output to file.
       #if not cb.ShowFrameAndTestContinue('Output', sim_frame)[0]:
-      if not camera.OutputFrameAndTestContinue('Output', sim_frame)[0]:
+      if not capture.OutputFrameAndTestContinue('Output', sim_frame)[0]:
         break
 
-def main():
-  camera = 'pixel2'  
-  #camera = 'raspi'
-  liveFeed = False
-  imageHeight = 720
 
-  dataDir = '/home/pi/RobotX2020VisionSystem/data'
-  #dataDir = '/Users/kwatra/Home/pvt/robotx/RobotX2020VisionSystem/data'
+def main():
+  mode = 'dev'
+  #mode = 'game'
+
+  # Flags to control operation.
+  if mode == 'dev':
+    # Flags during development.
+    #device = 'raspi'
+    #device = 'laptop_abhi'
+    device = 'laptop_kwatra'
+
+    #camera = 'pixel2'
+    camera = 'raspi'
+    fixRaspiCalib = True
+
+    liveFeed = False
+    imageHeight = 720
+    writeOutputToFile = True
+    writeOutputToServer = False
+    simulate = True
+    connectToNetworkTable = False
+  elif mode == 'game':
+    # Flags during game.
+    device = 'raspi'
+    camera = 'raspi'
+    fixRaspiCalib = False
+    liveFeed = True
+    imageHeight = 720
+    writeOutputToFile = False
+    writeOutputToServer = True
+    simulate = False
+    connectToNetworkTable = True
+  else:
+    raise ValueError('Unknown mode: ', mode)
+
+  np.set_printoptions(precision=2,suppress=True)
+
+  if connectToNetworkTable:
+    WaitForNetworkTableConnection()
+
+  if device == 'raspi':
+    dataDir = '/home/pi/RobotX2020VisionSystem/data'
+  elif device == 'laptop_kwatra':
+    dataDir = '/Users/kwatra/Home/pvt/robotx/RobotX2020VisionSystem/data'
+  elif device == 'laptop_abhi':
+    pass
+    #dataDir = '/Users/kwatra/Home/pvt/robotx/RobotX2020VisionSystem/data'
+  else:
+    raise ValueError('Unknown device')
+
   calibDir = os.path.join(dataDir, 'calib_data')
   inputDir = os.path.join(dataDir, 'target_videos')
   outputDir = os.path.join(dataDir, 'output')
@@ -1131,7 +1180,8 @@ def main():
     videoSource = os.path.join(inputDir, 'vision-tape-target-4.mp4')
   elif camera == 'raspi':
     #videoSource = os.path.join(inputDir, 'vision-tape-raspi-1.mov')
-    videoSource = os.path.join(inputDir, 'vision-tape-raspi-2.mov')
+    #videoSource = os.path.join(inputDir, 'vision-tape-raspi-2.mov')
+    videoSource = os.path.join(inputDir, 'vision-tape-raspi-2.mov-360-30-tracked.save01.mp4')
   else:
     raise ValueError('Unknown camera type.')
 
@@ -1149,15 +1199,47 @@ def main():
     print('Could not load or compute calibration.')
     return
 
-  outputFile = os.path.join(outputDir,
-      os.path.basename(videoSource) + '-' + calib.Id() + '-tracked.mp4')
-  camera = cb.CameraSource(videoSource, calib.imageHeight, outputFile, outputToServer=True)
+  if writeOutputToFile:
+    if liveFeed:
+      basefile = 'live_video-' + camera
+    else:
+      basefile = os.path.basename(videoSource)
+    outputFile = os.path.join(outputDir,basefile + '-' + calib.Id() + '-tracked.mp4')
+  else:
+    outputFile = None
+
+  capture = cb.CameraSource(videoSource,
+                            calib.imageHeight,
+                            outputFile,
+                            outputToServer=writeOutputToServer,
+                            capture_size=calib.calibVideoSize)
+
+  # Temp fix for erroneous raspi calib compared to the one used during capture.
+  if fixRaspiCalib:
+    if camera == 'raspi':
+      calib_size = tuple(calib.calibVideoSize)
+      capture_size = (capture.ORIGINAL_WIDTH, capture.ORIGINAL_HEIGHT)
+      if calib_size != capture_size:
+        if calib_size[1] == 1080 and (
+            capture_size[1] == 720 or capture_size[1] == 360):
+          scale = 0.75
+        else:
+          raise ValueError(
+              'Don\'t know how to fix calib for capture size', capture_size)
+        print('Original calibration:\n', calib.cameraMatrix)
+        calib.cameraMatrix[0, 0] *= scale
+        calib.cameraMatrix[1, 1] *= scale
+        calib.cameraMatrix[0, 2] = (calib.cameraMatrix[0, 2] * scale
+            + calib.ImageWidth() * (1 - scale) / 2)
+        calib.cameraMatrix[1, 2] = (calib.cameraMatrix[1, 2] * scale
+            + calib.ImageHeight() * (1 - scale) / 2)
+        print('Fixed calibration:\n', calib.cameraMatrix)
 
   tracker = ObjectTracker(calib)
 
   nFrames = 0
   while True:
-    frame = camera.GetFrame()
+    frame = capture.GetFrame()
     if frame is None:
       break
     
@@ -1168,13 +1250,13 @@ def main():
       edges = np.stack((edges, edges, edges), axis=2)
       concat = np.concatenate((frame, gray), axis=0)
 
-    ret, key = camera.OutputFrameAndTestContinue('Output', frame)
+    ret, key = capture.OutputFrameAndTestContinue('Output', frame)
     #ret = True
     #key = 0
 
     #ret = True
-    #ret = ret and camera.OutputFrameAndTestContinue('Output', frame)
-    #ret = ret and camera.OutputFrameAndTestContinue('Output', concat)
+    #ret = ret and capture.OutputFrameAndTestContinue('Output', frame)
+    #ret = ret and capture.OutputFrameAndTestContinue('Output', concat)
     #ret = ret and cb.ShowFrameAndTestContinue('Gray frame', gray)
     #ret = ret and cb.ShowFrameAndTestContinue('Frame', frame)
     #ret = ret and cb.ShowFrameAndTestContinue('Edges', edges)
@@ -1182,7 +1264,7 @@ def main():
       break;
 
     if simulate:
-      RunSimulation(tracker, camera, frame, key)
+      RunSimulation(tracker, capture, frame, key)
     nFrames += 1
 
 

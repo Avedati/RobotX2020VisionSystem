@@ -43,19 +43,31 @@ class VideoWriter(object):
 
 class CameraSource(object):
   def __init__(self, cameraSource, height, output_file=None, startFrame=0,
-               async_read=False, outputToServer=False):
+               async_read=False, outputToServer=False, capture_size=None):
     if async_read:
       self.camera = VideoCaptureAsync(cameraSource)
+    else:
+      self.camera = cv2.VideoCapture(cameraSource)
+
+    if capture_size is not None:
+      print(capture_size)
+      self.camera.set(cv2.CAP_PROP_FRAME_WIDTH, capture_size[0])
+      self.camera.set(cv2.CAP_PROP_FRAME_HEIGHT, capture_size[1])
+
+    if async_read:
       self.ORIGINAL_WIDTH = self.camera.width
       self.ORIGINAL_HEIGHT = self.camera.height
     else:
-      self.camera = cv2.VideoCapture(cameraSource)
       self.ORIGINAL_WIDTH = int(self.camera.get(cv2.CAP_PROP_FRAME_WIDTH))
       self.ORIGINAL_HEIGHT = int(self.camera.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    self.HEIGHT = min(self.ORIGINAL_HEIGHT, height)
-    self.WIDTH = int(self.ORIGINAL_WIDTH * self.HEIGHT / self.ORIGINAL_HEIGHT)
-    #self.camera.set(cv2.CAP_PROP_FRAME_WIDTH, self.WIDTH)
-    #self.camera.set(cv2.CAP_PROP_FRAME_HEIGHT, self.HEIGHT)
+
+    print('CameraSource')
+    print('Requested capture size', capture_size)
+    print('Actual capture size', self.ORIGINAL_WIDTH, self.ORIGINAL_HEIGHT)
+
+    self.HEIGHT = height
+    self.WIDTH = self.ORIGINAL_WIDTH * self.HEIGHT // self.ORIGINAL_HEIGHT
+    self.WIDTH = self.WIDTH + self.WIDTH % 2  # Make it even.
 
     self.startFrame = startFrame
     self.nFrames = 0
@@ -67,7 +79,8 @@ class CameraSource(object):
     self.outputToServer = outputToServer
     if outputToServer:
       # https://robotpy.readthedocs.io/en/stable/vision/code.html
-      self.outputStream = CameraServer.getInstance().putVideo('ProcessedVisionFrame', self.WIDTH, self.HEIGHT)
+      self.outputStream = CameraServer.getInstance().putVideo(
+          'ProcessedVisionFrame', self.WIDTH, self.HEIGHT)
 
 
   def GetFrame(self):  
@@ -95,7 +108,8 @@ class CameraSource(object):
     self.nFrames += 1
     ret, frame = self.camera.read()
     if ret and frame is not None:
-      frame = cv2.resize(frame, (self.WIDTH, self.HEIGHT))
+      if frame.shape[0] != self.HEIGHT:
+        frame = cv2.resize(frame, (self.WIDTH, self.HEIGHT))
     return frame
 
 
@@ -141,15 +155,13 @@ class Chessboard(object):
   def SquareWidth(self):
     return self.squareWidth
 
-
-
 class Calibration(object):
   def __init__(self,
                calibVideo,
                imageHeight,
                maxSamples,
                startFrame=0):
-    self.calibFileHeight = imageHeight
+    self.calibHeight = imageHeight
     self.imageHeight = imageHeight
     self.calibVideo = calibVideo
     self.maxSamples = maxSamples
@@ -157,7 +169,9 @@ class Calibration(object):
     name = self.Id()
     self.calibFileCam = calibVideo + '-' + str(name) + '-calib_cam.txt'
     self.calibFileDist = calibVideo + '-' + str(name) + '-calib_dist.txt'
+    self.calibFileSize = calibVideo + '-calib_size.txt'
     self.hasCalib = False
+    self.calibVideoSize = None
     self.cameraMatrix = None
     self.distCoeffs = None
 
@@ -166,12 +180,25 @@ class Calibration(object):
     return str(self.imageHeight) + '-' + str(self.maxSamples)
 
 
+  def ImageHeight(self):
+    return self.imageHeight
+
+    
+  def ImageWidth(self):
+    imageWidth = self.imageHeight * self.calibVideoSize[0] // self.calibVideoSize[1]
+    imageWidth = imageWidth + imageWidth % 2  # Make it even.
+    return imageWidth
+    
+
   def PrintInfo(self):
     print('Calibration files:')
+    print(self.calibFileSize)
     print(self.calibFileCam)
     print(self.calibFileDist)
-    print('Calib file image height', self.calibFileHeight)
-    print('Calib matrix image height', self.imageHeight)
+    print('Calib original image height', self.calibHeight)
+    print('Calib final image height', self.imageHeight)
+    print('Calib final image width', self.ImageWidth())
+    print('Calib video size', self.calibVideoSize)
     if self.hasCalib:
       print('CameraMatrix:\n', self.cameraMatrix)
       print('DistCoeffs:\n', self.distCoeffs)
@@ -185,20 +212,24 @@ class Calibration(object):
     
     # Read from file.
     self.hasCalib = False
-    if (os.path.exists(self.calibFileCam) and
+    if (os.path.exists(self.calibFileSize) and
+        os.path.exists(self.calibFileCam) and
         os.path.exists(self.calibFileDist)):
       print('Loading calibratin info from files.')
-      self.cameraMatrix = np.loadtxt(self.calibFileCam)
-      success = self.cameraMatrix.shape == (3, 3)
+      self.calibVideoSize = np.loadtxt(self.calibFileSize).astype(int)
+      success = self.calibVideoSize.shape == (2,)
       if success:
-        self.distCoeffs = np.loadtxt(self.calibFileDist)
-        success = self.distCoeffs.shape == (5,)
+        self.cameraMatrix = np.loadtxt(self.calibFileCam)
+        success = self.cameraMatrix.shape == (3, 3)
         if success:
-          self.hasCalib = True
-          print('Loaded successfully.')
-          self.PrintInfo()
-          self._RecomputeForNewSize(finalImageHeight)
-          return True
+          self.distCoeffs = np.loadtxt(self.calibFileDist)
+          success = self.distCoeffs.shape == (5,)
+          if success:
+            self.hasCalib = True
+            print('Loaded successfully.')
+            self.PrintInfo()
+            self._RecomputeForNewSize(finalImageHeight)
+            return True
 
     # Failed to read.
     if not self.hasCalib:
@@ -214,6 +245,11 @@ class Calibration(object):
                     cols=None,
                     forceRecompute=False,
                     finalImageHeight=None):
+    """Loads or computes calibration.
+       When finalImageHeight is given, scales camera matrix to final height,
+       which may be different from the imageHeight at which calibration is
+       computed.
+    """
     if forceRecompute:
       print('Forcing recomputation of calibration data.')
     elif self.LoadFromFile(finalImageHeight):
@@ -228,7 +264,9 @@ class Calibration(object):
     imagePoints = []
  
     camera = CameraSource(
-        self.calibVideo, self.calibFileHeight, startFrame=self.startFrame)
+        self.calibVideo, self.calibHeight, startFrame=self.startFrame)
+    self.calibVideoSize = (camera.ORIGINAL_WIDTH, camera.ORIGINAL_HEIGHT)
+
     chess = Chessboard(squareWidth, rows, cols)
  
     print('Extracting frames for calibration.')
@@ -263,10 +301,12 @@ class Calibration(object):
     _, self.cameraMatrix, self.distCoeffs, _, _ = cv2.calibrateCamera(
         objectPoints, imagePoints, camera.ImageSize(), None, None) 
     self.hasCalib = True
-   
+
     self.PrintInfo()
+    print('Saving calib video size to: ', self.calibFileSize)
     print('Saving camera matrix to: ', self.calibFileCam)
     print('Saving distortion coeffs to: ', self.calibFileDist)
+    np.savetxt(self.calibFileSize, self.calibVideoSize)
     np.savetxt(self.calibFileCam, self.cameraMatrix)
     np.savetxt(self.calibFileDist, self.distCoeffs)
     print('Done.')
@@ -281,7 +321,10 @@ class Calibration(object):
       return
     if imageHeight == self.imageHeight:
       return
+    # Multiply focal length and center by height ratio.
+    # All other entries are 0 or 1 (bottom-right, so keep that at 1).
     self.cameraMatrix *= imageHeight / self.imageHeight
+    self.cameraMatrix[2, 2] = 1.0
     self.imageHeight = imageHeight
     print('Updated calibration to new height', imageHeight)
     self.PrintInfo()
@@ -313,7 +356,8 @@ def RunPoseEstimation(video, outputDir, calib, chess):
   outputFile = os.path.join(
       outputDir,
       os.path.basename(video) + '-' + calib.Id() + '-detected_pose.mp4')
-  camera = CameraSource(video, calib.imageHeight, outputFile)
+  camera = CameraSource(
+      video, calib.imageHeight, outputFile, capture_size=calib.calibVideoSize)
   coordFrame = CoordinateFrame(chess.SquareWidth() * 2)
 
   rvec = None
@@ -352,8 +396,8 @@ def main():
   camera = 'logitech'
   imageHeight = 720
 
-  dataDir = '/home/pi/RobotX2020VisionSystem/data'
-  #dataDir = '/Users/kwatra/Home/pvt/robotx/RobotX2020VisionSystem/data'
+  #dataDir = '/home/pi/RobotX2020VisionSystem/data'
+  dataDir = '/Users/kwatra/Home/pvt/robotx/RobotX2020VisionSystem/data'
   calibDir = os.path.join(dataDir, 'calib_data')
   outputDir = os.path.join(dataDir, 'output')
 
