@@ -588,14 +588,19 @@ class ObjectTracker(object):
     eps = 0.1
     self.r_clear_back = self.hexagon.r_back - self.r_ball - eps
 
-    # Robot configuration.
+    # Robot to camera configuration.
     # TODO: Some of these should be computed as calibration between camera and
     # robot.
-    # Yaw (in radians): angle from camera orientation to robot orientation.
-    # Should be +ve if robot is to the left of camera.
-    self.camera_to_robot_yaw = 0 # -10 * np.pi / 180
-    # Offset vector: vector from camera origin to robot origin.
-    self.camera_to_robot_vec = (0, 0, 0) #(0, -5, -4.5) #(20, 10, 5)  # (20, 10, 5)
+    # Yaw (in radians): angle from robot orientation to camera orientation.
+    # Should be +ve if camera is pointing to the left of the robot.
+    self.robot_to_camera_yaw = 0 # 10 * np.pi / 180
+    # Offset vector: vector from robot origin to camera origin in robot coords.
+    # i.e. expressed with:
+    #   Robot launch point as origin,
+    #   y-axis vertically downwards (aligned with world-y),
+    #   z-axis is projection of launch direction onto ground plane,
+    #   x-axis (y X z): parallel to ground, perpendicular to launch plane.
+    self.robot_to_camera_vec = (0, 5, 4.5)
 
 
   def Track(self, frame):
@@ -726,20 +731,24 @@ class ObjectTracker(object):
     if self.rvec is None or self.tvec is None:
       return
 
-    tvec = np.squeeze(self.tvec)
-    rmat, _ = cv2.Rodrigues(self.rvec)
+    # Translation and rotation for world -> camera.
+    Twc = np.squeeze(self.tvec)
+    Rwc, _ = cv2.Rodrigues(self.rvec)
 
+    # Inverse: camera -> world.
     def cam2world(point):
-      return np.matmul(np.transpose(rmat), (point - tvec))
+      #    p_c == Rwc * p_w + Twc
+      # => p_w = transpose(Rwc) * (p_c - Twc)
+      return np.matmul(np.transpose(Rwc), (point - Twc))
 
     # Camera origin and orientation (z-vector) in world coords.
     cam_origin = cam2world(np.zeros((3,)))
-    cam_orient = cam2world(np.asarray([0, 0, 1])) - cam_origin
+    cam_z = cam2world(np.asarray([0, 0, 1])) - cam_origin
 
     # Robot orientation (z-vector) in world coordinates:
     # Project to x-z plane and apply camera to robot rotation about y-axis.
-    x, _, z = tuple(cam_orient)
-    yaw = self.camera_to_robot_yaw
+    x, _, z = tuple(cam_z)
+    yaw = -self.robot_to_camera_yaw
     rob_z = np.array((x * np.cos(yaw) - z * np.sin(yaw), 0,
                       x * np.sin(yaw) + z * np.cos(yaw)))
     rob_norm = np.linalg.norm(rob_z)
@@ -750,25 +759,33 @@ class ObjectTracker(object):
     rob_y = np.array((0, 1, 0))
     rob_x = np.array((rob_z[2], 0, -rob_z[0]))
 
-    # Robot origin in world coords.
-    rob_origin = cam_origin + self.camera_to_robot_vec
+    # Robot coordinate system: robot --> world rotation.
+    Rrw = np.zeros((3,3))
+    Rrw[:,0] = rob_x
+    Rrw[:,1] = rob_y
+    Rrw[:,2] = rob_z
+
+    # Robot origin in world coordinates:
+    # Transform the robot->camera vector from robot-coords to world coords, and
+    # subtract from camera origin in world coords.
+    rob_to_cam = np.matmul(Rrw, self.robot_to_camera_vec)
+    rob_origin = cam_origin - rob_to_cam
+
+    # Transforms world -> robot.
+    def world2rob(point):
+      return np.matmul(np.transpose(Rrw), (point - rob_origin))
 
     # Front target (world origin == hexagon center) in robot coords.
-    #
-    # Same as projection of robot_to_target vector to robot coordinate system.
     target_front = np.array((0, 0, 0))
-    rob_to_tgt_w = target_front - rob_origin
-    rob_to_tgt_r = np.array((np.dot(rob_to_tgt_w, rob_x),
-                             np.dot(rob_to_tgt_w, rob_y),
-                             np.dot(rob_to_tgt_w, rob_z)))
+    rob_to_tgt_r = world2rob(target_front)
 
     # Update state.
     self.cam_origin = cam_origin
-    self.cam_orient = cam_orient
+    self.cam_orient = cam_z
     self.rob_origin = rob_origin
     self.rob_orient = rob_z
     self.target_in_robot_coords = rob_to_tgt_r
-    print(tvec, cam_origin, rob_origin, cam_orient, rob_z, rob_to_tgt_r, rob_to_tgt_w)
+    print(Twc, cam_origin, rob_origin, cam_z, rob_z, rob_to_tgt_r)
 
 
   def ComputeLaunchData(self, frame=None):
@@ -1133,7 +1150,7 @@ def main():
 
     #camera = 'pixel2'
     camera = 'raspi'
-    fixRaspiCalib = True
+    fixRaspiCalib = False
 
     liveFeed = False
     imageHeight = 720
@@ -1189,7 +1206,8 @@ def main():
     calibVideo = os.path.join(calibDir, 'chessboard-tv.mp4')
     maxSamples = 25
   elif camera == 'raspi':
-    calibVideo = os.path.join(calibDir, 'checkerboard-raspi.mov')
+    #calibVideo = os.path.join(calibDir, 'checkerboard-raspi.mov')
+    calibVideo = os.path.join(calibDir, 'calibration-2-312020.mov')
     maxSamples = 30
   else:
     raise ValueError('Unknown camera type.')
