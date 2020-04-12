@@ -846,10 +846,17 @@ class ObjectTracker(object):
           {'points': points, 'viable': viable, 'speeds': speeds})
     
     # Write to network tables.
-    # TODO: Add speed and any other info.
     sd.putNumber('AngleFrontPort', self.launch_data[1]['angle'])
     sd.putNumber('AngleBackPort', self.launch_data[2]['angle'])
     sd.putBoolean('TrackingSuccess', self.trackingSuccess)
+
+    for idx, orientation in enumerate(['current', 'aimFront', 'aimBack']):
+      for type_, location in enumerate(['Front', 'Back']):
+        sd.putBoolean(orientation + 'Viable' + location, self.launch_data[idx]['viable'][type_])
+        if self.launch_data[idx]['viable'][type_]:
+          sd.putNumber(orientation + 'Speed' + location, self.launch_data[idx]['speeds'][type_])
+        else:
+          sd.putNumber(orientation + 'Speed' + location, 0)
 
     if frame is not None:
       # Clearance circles.
@@ -962,7 +969,6 @@ class ObjectTracker(object):
     viable_front = abs(aim_front[0]) < self.r_clear_front
     viable_back = viable_front and abs(aim_back[0]) < self.r_clear_back
    
-    # TODO: Compute speeds.
     #velocity
     height = rob_origin[1]
     speeds = (None if not viable_front else self.ComputeBallVelocity(df, height),
@@ -1145,11 +1151,11 @@ def main():
   if mode == 'dev':
     # Flags during development.
     #device = 'raspi'
-    #device = 'laptop_abhi'
-    device = 'laptop_kwatra'
+    device = 'laptop_abhi'
+    #device = 'laptop_kwatra'
 
-    #camera = 'pixel2'
-    camera = 'raspi'
+    camera = 'pixel2'
+    #camera = 'raspi'
     fixRaspiCalib = False
 
     liveFeed = False
@@ -1163,7 +1169,7 @@ def main():
     device = 'raspi'
     camera = 'raspi'
     fixRaspiCalib = False
-    liveFeed = True
+    liveFeed = False
     imageHeight = 720
     writeOutputToFile = False
     writeOutputToServer = True
@@ -1182,8 +1188,7 @@ def main():
   elif device == 'laptop_kwatra':
     dataDir = '/Users/kwatra/Home/pvt/robotx/RobotX2020VisionSystem/data'
   elif device == 'laptop_abhi':
-    pass
-    #dataDir = '/Users/kwatra/Home/pvt/robotx/RobotX2020VisionSystem/data'
+    dataDir = '/Users/spiderfencer/RobotX2020VisionSystem/python/v4/data'
   else:
     raise ValueError('Unknown device')
 
@@ -1198,7 +1203,8 @@ def main():
   elif camera == 'raspi':
     #videoSource = os.path.join(inputDir, 'vision-tape-raspi-1.mov')
     #videoSource = os.path.join(inputDir, 'vision-tape-raspi-2.mov')
-    videoSource = os.path.join(inputDir, 'vision-tape-raspi-2.mov-360-30-tracked.save01.mp4')
+    #videoSource = os.path.join(inputDir, 'vision-tape-raspi-2.mov-360-30-tracked.save01.mp4')
+    videoSource = os.path.join(inputDir, 'vision-tape-raspi-2.mov')
   else:
     raise ValueError('Unknown camera type.')
 
@@ -1206,8 +1212,8 @@ def main():
     calibVideo = os.path.join(calibDir, 'chessboard-tv.mp4')
     maxSamples = 25
   elif camera == 'raspi':
-    #calibVideo = os.path.join(calibDir, 'checkerboard-raspi.mov')
-    calibVideo = os.path.join(calibDir, 'calibration-2-312020.mov')
+    calibVideo = os.path.join(calibDir, 'checkerboard-raspi.mov')
+    #calibVideo = os.path.join(calibDir, 'calibration-2-312020.mov')
     maxSamples = 30
   else:
     raise ValueError('Unknown camera type.')
