@@ -1,3 +1,15 @@
+"""
+Instructions:
+- Run the program with an argument from 0-11, which refers to the name of the video that you would like to examine from the res folder.
+- Press the `p` key to play or pause the video.
+- While paused:
+  - Press the `i` key to input a frame number to go to in the video (the first frame is index 0, input is done through the command line).
+  - Press the `x` key to get the x position of the ball in the frame.
+  - Press the `y` key to get the y position of the ball in the frame.
+  - Press the `g` key to get the current frame index.
+  - Press the `v` key to approximate the instantaneous velocity of the ball at the current frame (approximation is made using the next frame).
+"""
+
 import cv2
 import numpy as np
 import sys
