@@ -5,8 +5,9 @@ import os
 import time
 
 from videocaptureasync import VideoCaptureAsync
+"""
 from cscore import CameraServer
-
+"""
 
 def ShowFrameAndTestContinue(message, frame, height=None):
   if height is not None:
@@ -79,8 +80,9 @@ class CameraSource(object):
     self.outputToServer = outputToServer
     if outputToServer:
       # https://robotpy.readthedocs.io/en/stable/vision/code.html
-      self.outputStream = CameraServer.getInstance().putVideo(
-          'ProcessedVisionFrame', self.WIDTH, self.HEIGHT)
+      pass
+      #self.outputStream = CameraServer.getInstance().putVideo(
+      #    'ProcessedVisionFrame', self.WIDTH, self.HEIGHT)
 
 
   def GetFrame(self):  

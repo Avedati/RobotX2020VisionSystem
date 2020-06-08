@@ -602,6 +602,12 @@ class ObjectTracker(object):
     #   x-axis (y X z): parallel to ground, perpendicular to launch plane.
     self.robot_to_camera_vec = (0, 5, 4.5)
 
+    self.drag_coefficient = 0.557027860418775 # Calculated experimentally using ./analysis_of_throwing/res/0.mp4
+    self.drag_area = 2 * np.pi * self.r_ball**2 # half of the ball's surface area in inches^2.
+    self.volume = (4/3) * np.pi * self.r_ball**3 # in inches^3
+    self.last_update_time = time.time()
+    self.update_delta_time = 0
+
 
   def Track(self, frame):
     gray, edges = self.GetEdgeImage(frame)
@@ -918,6 +924,10 @@ class ObjectTracker(object):
       return None
     return sec1 * np.sqrt(sec2)
 
+  def AdjustBallVelocity(self, velocity):
+    velocity -= self.drag_coefficient * self.drag_area * (velocity**2) * self.update_delta_time / (2 * self.volume)
+    return velocity
+
   def ComputeBallPlaneAndSpeed(self, robot_to_target, rob_origin):
     """Determine the "ball plane" within which the ball will fly towards the
     target, given the robot_to_target direction vector.
@@ -932,6 +942,10 @@ class ObjectTracker(object):
     Ball speed:
       Tuple indicating ball speed for (front, back) target, if viable.
     """
+
+    self.update_delta_time = time.time() - self.last_update_time
+    self.last_update_time = time.time()
+
     failure = (((0.0, 0.0, 0.0),)*3, (False, False), (0.0, 0.0))
     if not self.trackingSuccess:
       return failure
@@ -971,8 +985,8 @@ class ObjectTracker(object):
    
     #velocity
     height = rob_origin[1]
-    speeds = (None if not viable_front else self.ComputeBallVelocity(df, height),
-              None if not viable_back else self.ComputeBallVelocity(db, height))
+    speeds = (None if not viable_front else self.AdjustBallVelocity(self.ComputeBallVelocity(df, height)),
+              None if not viable_back else self.AdjustBallVelocity(self.ComputeBallVelocity(db, height)))
     viable_front = viable_front and speeds[0] is not None
     viable_back = viable_back and speeds[1] is not None
     
@@ -1188,7 +1202,7 @@ def main():
   elif device == 'laptop_kwatra':
     dataDir = '/Users/kwatra/Home/pvt/robotx/RobotX2020VisionSystem/data'
   elif device == 'laptop_abhi':
-    dataDir = '/Users/spiderfencer/RobotX2020VisionSystem/python/v4/data'
+    dataDir = '/Users/spiderfencer/RobotX2020VisionSystem/data'
   else:
     raise ValueError('Unknown device')
 
