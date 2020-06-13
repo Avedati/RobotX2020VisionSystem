@@ -602,7 +602,8 @@ class ObjectTracker(object):
     #   x-axis (y X z): parallel to ground, perpendicular to launch plane.
     self.robot_to_camera_vec = (0, 5, 4.5)
 
-    self.drag_coefficient = 0.557027860418775 # Calculated experimentally using ./analysis_of_throwing/res/0.mp4
+		# old value: self.drag_coefficient = 0.557027860418775
+    self.drag_coefficient = 0.73153202686 # Calculated experimentally using ball.py
     self.drag_area = 2 * np.pi * self.r_ball**2 # half of the ball's surface area in inches^2.
     self.volume = (4/3) * np.pi * self.r_ball**3 # in inches^3
     self.last_update_time = time.time()

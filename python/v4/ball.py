@@ -255,7 +255,25 @@ class BallTracker(object):
     print(xyz)
     print(boundaries)
 
-    normal, mask = self.FitPlane(xyz)
+    normal, mask, a, b = self.FitPlane(xyz)
+
+    for i in range(len(positions)):
+      p0 = positions[i][1]
+      p1 = positions[i][2]
+      p2 = positions[i][3]
+      # https://math.stackexchange.com/questions/1167717/transform-a-plane-to-the-xy-plane
+      cos_theta = -1 / math.sqrt(a**2 + b**2 + 1)
+      sin_theta = math.sqrt((a**2 + b**2) / (a**2 + b**2 + 1))
+      u1 = b / math.sqrt(a**2 + b**2 + 1)
+      u2 = -a / math.sqrt(a**2 + b**2 + 1)
+      mat = [
+        [cos_theta + (u1**2) * (1 - cos_theta), u1 * u2 * (1 - cos_theta), u2 * sin_theta],
+        [u1 * u2 * (1 - cos_theta), cos_theta + (u2**2) * (1 - cos_theta), -u1 * sin_theta],
+        [-u2 * sin_theta, u1 * sin_theta, cos_theta]
+      ]
+      positions[i][1] = p0 * mat[0][0] + p1 * mat[0][1] + p2 * mat[0][2]
+      positions[i][2] = p0 * mat[1][0] + p1 * mat[1][1] + p2 * mat[1][2]
+      positions[i][3] = p0 * mat[2][0] + p1 * mat[2][1] + p2 * mat[2][2]
 
     if outputFile is not None:
       np.savetxt(outputFile, positions)
@@ -324,13 +342,15 @@ class BallTracker(object):
     # aX + bY -Z + d = 0
     # Normal: (a, b, -1)
     normal = np.asarray(tuple(coeff) + (-1,))
+    a = normal[0]
+    b = normal[1]
     normal /= np.linalg.norm(normal)
 
     print(normal)
     print(intercept)
     print(inlier_mask)
 
-    return normal, inlier_mask
+    return normal, inlier_mask, a, b
 
 
 
@@ -339,7 +359,13 @@ def main():
   #camera = 'raspi'
   imageHeight = 720
 
-  dataDir = '/Users/kwatra/Home/pvt/robotx/RobotX2020VisionSystem/data'
+  device = 'laptop_abhi'
+
+  if device == 'laptop_kwatra':
+    dataDir = '/Users/kwatra/Home/pvt/robotx/RobotX2020VisionSystem/data'
+  elif device == 'laptop_abhi':
+    dataDir = '/Users/spiderfencer/RobotX2020VisionSystem/data'
+
   calibDir = os.path.join(dataDir, 'calib_data')
   inputDir = os.path.join(dataDir, 'ball_videos')
   outputDir = os.path.join(dataDir, 'output')
