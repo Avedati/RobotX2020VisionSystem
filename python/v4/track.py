@@ -1165,12 +1165,12 @@ def main():
   # Flags to control operation.
   if mode == 'dev':
     # Flags during development.
-    #device = 'raspi'
-    device = 'laptop_abhi'
+    device = 'raspi'
+    #device = 'laptop_abhi'
     #device = 'laptop_kwatra'
 
-    camera = 'pixel2'
-    #camera = 'raspi'
+    #camera = 'pixel2'
+    camera = 'raspi'
     fixRaspiCalib = False
 
     liveFeed = False
@@ -1189,7 +1189,7 @@ def main():
     writeOutputToFile = False
     writeOutputToServer = True
     simulate = False
-    connectToNetworkTable = True
+    connectToNetworkTable = False
   else:
     raise ValueError('Unknown mode: ', mode)
 
