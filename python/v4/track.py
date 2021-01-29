@@ -1159,8 +1159,8 @@ def RunSimulation(tracker, capture, frame, key):
 
 
 def main():
-  mode = 'dev'
-  #mode = 'game'
+  #mode = 'dev'
+  mode = 'game'
 
   # Flags to control operation.
   if mode == 'dev':
