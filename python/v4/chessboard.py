@@ -217,7 +217,7 @@ class Calibration(object):
     if (os.path.exists(self.calibFileSize) and
         os.path.exists(self.calibFileCam) and
         os.path.exists(self.calibFileDist)):
-      print('Loading calibratin info from files.')
+      print('Loading calibration info from files.')
       self.calibVideoSize = np.loadtxt(self.calibFileSize).astype(int)
       success = self.calibVideoSize.shape == (2,)
       if success:
