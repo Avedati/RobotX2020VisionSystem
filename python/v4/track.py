@@ -1184,7 +1184,7 @@ def main():
     device = 'raspi'
     camera = 'raspi'
     fixRaspiCalib = False
-    liveFeed = False
+    liveFeed = True
     imageHeight = 720
     writeOutputToFile = False
     writeOutputToServer = True
