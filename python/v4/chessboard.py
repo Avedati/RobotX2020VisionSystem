@@ -160,11 +160,35 @@ class Chessboard(object):
 class Calibration(object):
   def __init__(self,
                calibVideo,
-               imageHeight,
+               calibHeight,
                maxSamples,
                startFrame=0):
-    self.calibHeight = imageHeight
-    self.imageHeight = imageHeight
+    """
+    Initializes calibration class.
+    There are three different size dimensions / height values used in here:
+      calibHeight: Height of the image at which calibration is computed
+        (or was computed and is now being loaded from file). This should
+        match the number in the name of calibration files (also matches the
+        value returned by calib.Id()). This is only used to identify the calib
+        file or run calibration. When running tracking or pose estimation, use
+        imageHeight to get the correct height corresponding to the calib class.
+      imageHeight: Height at which the video is being processed
+        during tracking. This may differ from calibHeight, for example to
+        process the video at a lower resolution than that used during
+        calibration. This value is initialized here to be the same as
+        calibHeight but can be changed to a different height in LoadOrCompute()
+        by passing finalImageHeight.
+      calibVideoSize: Width and Height of the image being captured and returned
+        by the sensor. This is the raw sensor image size used during calibration,
+        and the same should be used during tracking / pose estimation. The raw
+        frames are resized to calibHeight during calibration.
+        During tracking or pose estimation, this calibVideoSize should be passed
+        to CameraSource via capture_size, so it captures the video at the same
+        size as used during calibration. The imageHeight can be passed to
+        CameraSource to resize the captured images to that size.
+    """
+    self.calibHeight = calibHeight
+    self.imageHeight = calibHeight
     self.calibVideo = calibVideo
     self.maxSamples = maxSamples
     self.startFrame = startFrame
@@ -179,7 +203,7 @@ class Calibration(object):
 
 
   def Id(self):
-    return str(self.imageHeight) + '-' + str(self.maxSamples)
+    return str(self.calibHeight) + '-' + str(self.maxSamples)
 
 
   def ImageHeight(self):

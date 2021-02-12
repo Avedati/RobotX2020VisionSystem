@@ -1174,7 +1174,13 @@ def main():
     fixRaspiCalib = False
 
     liveFeed = False
+    # Desired resolution at which to process frames. Can be changed at will
+    # depending upon acceptable processing speed.
     imageHeight = 720
+    # Resolution at which the calibration was computed. Determines
+    # calib file name, so should be selected accordingly.
+    calibHeight = 720
+ 
     writeOutputToFile = True
     writeOutputToServer = False
     simulate = True
@@ -1185,7 +1191,12 @@ def main():
     camera = 'raspi'
     fixRaspiCalib = False
     liveFeed = True
+    # Desired resolution at which to process frames. Can be changed at will
+    # depending upon acceptable processing speed.
     imageHeight = 720
+    # Resolution at which the calibration was computed. Determines
+    # calib file name, so should be selected accordingly.
+    calibHeight = 720
     writeOutputToFile = False
     writeOutputToServer = True
     simulate = False
@@ -1233,7 +1244,7 @@ def main():
   else:
     raise ValueError('Unknown camera type.')
 
-  calib = cb.Calibration(calibVideo, 720, maxSamples)
+  calib = cb.Calibration(calibVideo, calibHeight, maxSamples)
   if not calib.LoadOrCompute(finalImageHeight=imageHeight):
     print('Could not load or compute calibration.')
     return
@@ -1243,7 +1254,9 @@ def main():
       basefile = 'live_video-' + camera
     else:
       basefile = os.path.basename(videoSource)
-    outputFile = os.path.join(outputDir,basefile + '-' + calib.Id() + '-tracked.mp4')
+    outputFile = os.path.join(
+        outputDir,
+        basefile + '-calib' + calib.Id() + '-' + imageHeight + '-tracked.mp4')
   else:
     outputFile = None
 
