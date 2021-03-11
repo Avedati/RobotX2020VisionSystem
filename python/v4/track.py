@@ -14,6 +14,17 @@ from networktables import NetworkTables
 cond = threading.Condition()
 notified = [False]
 
+"""A function that is called when we successfuly connect to network tables.
+
+It is used to set the notified variable to true in the main thread.
+
+Parameters
+----------
+connected : bool
+	Whether or not we successfully connected.
+info : networktables.ConnectionInfo
+	Information about our connection.
+"""
 def connectionListener(connected, info):
     print(info, '; Connected=%s' % connected)
     with cond:
@@ -23,6 +34,10 @@ def connectionListener(connected, info):
 NetworkTables.initialize(server='10.69.62.2')
 NetworkTables.addConnectionListener(connectionListener, immediateNotify=True)
 
+"""A function that waits to connect to networktables asynchronously.
+
+It waits for the connectionListener function to set notified to True.
+"""
 def WaitForNetworkTableConnection():
   with cond:
     print("Waiting")
@@ -32,20 +47,114 @@ def WaitForNetworkTableConnection():
 sd = NetworkTables.getTable('SmartDashboard')
 
 # Assume indexed contour for all functions here.
+"""A function that gets the point with the maximum x value (right-most x value) in the contour.
+
+Parameters
+----------
+contour : np.array_like
+	The contour, or shape, to find the maximum x value for.
+	
+Returns
+-------
+np.array_like
+	The point with the maximum x value.
+"""
 def max_x(contour):
   return max(contour, key=lambda ic: ic[1][0])
+
+"""A function that gets the point with the maximum y value (bottom-most y value) in the contour.
+
+Parameters
+----------
+contour : np.array_like
+	The contour, or shape, to find the maximum y value for.
+	
+Returns
+-------
+np.array_like
+	The point with the maximum y value.
+"""
 def max_y(contour):
   return max(contour, key=lambda ic: ic[1][1])
+
+"""A function that gets the point with the minimum x value (left-most x value) in the contour.
+
+Parameters
+----------
+contour : np.array_like
+	The contour, or shape, to find the minimum x value for.
+	
+Returns
+-------
+np.array_like
+	The point with the minimum x value.
+"""
 def min_x(contour):
   return min(contour, key=lambda ic: ic[1][0])
+
+"""A function that gets the point with the minimum y value (top-most y value) in the contour.
+
+Parameters
+----------
+contour : np.array_like
+	The contour, or shape, to find the minimum y value for.
+	
+Returns
+-------
+np.array_like
+	The point with the minimum y value.
+"""
 def min_y(contour):
   return min(contour, key=lambda ic: ic[1][1])
+
+"""A function that returns the nearest point in the contour to the prediction
+
+Parameters
+----------
+pred : np.array_like
+	The predicted xy point.
+contour : np.array_like
+	The contour, or shape, to find the nearest point to the predicted point for.
+	
+Returns
+-------
+np.array_like
+	The point nearest to the predicted point.
+"""
 def nearest(pred, contour):
   return min(contour, key=lambda ic: np.linalg.norm(ic[1]-pred))
+
+"""A function that returns the point in the contour with the lowest cosine value.
+
+Parameters
+----------
+cosines : list<int>
+	The cosines, in order, of the points of the contour.
+contour : np.array_like
+	The contour, or shape, to find the point with the lowest cosine value for.
+	
+Returns
+-------
+np.array_like
+	The point with the lowest cosine value.
+"""
 def min_cos(cosines, contour):
   return min(contour, key=lambda ic: cosines[ic[0]])
 
+"""A function that shifts the contour such that:
+- The point at index 0 has the minimum x value.
+- The contour is sorted in an anti-clockwise direction.
 
+Parameters
+----------
+contour : np.array_like
+	The contour, or shape, to modify.
+
+Returns
+-------
+np.array_like
+	The processed contour.
+"""
 def canonical_contour(contour):
   # Point 0. Min-x value.
   idx0, cnt0 = min_x(contour)
@@ -67,7 +176,20 @@ def canonical_contour(contour):
     contour = sorted([((npts - i) % npts, c) for i,c in contour])
   return contour
 
+"""A function that merges points within a contour that are <= min_dist from their neighbors.
 
+Parameters
+----------
+contour : np.array_like
+	The contour, or shape, to merge close points for.
+min_dist : float
+	The minimum dist between two points to avoid merging them.
+
+Returns
+-------
+np.array_like
+	The processed contour.
+"""
 def merge_nearby_points(contour, min_dist):
   merged = []
   for ic in contour:
@@ -75,7 +197,18 @@ def merge_nearby_points(contour, min_dist):
       merged.append(ic[1])
   return list(enumerate(merged))
 
+"""A function that finds the cosine of each angle at each point in the contour.
 
+Parameters
+----------
+contour : np.array_like
+	The contour, or shape, to find the cosines for.
+
+Returns
+-------
+list<float>
+	The cosines of each angle at each point in the contour.
+"""
 def contour_cosines(contour):
   points = [c for _,c in contour]
   points2 = points[1:] + points[:1]   # Next, with rotation.
@@ -89,7 +222,28 @@ def contour_cosines(contour):
     cosines.append(cosine)
   return cosines
 
+"""A function that gets the points within a specific rectangle in the contour.
 
+Parameters
+----------
+contour : np.array_like
+	The contour, or shape, to find the points for.
+x_lo : optional, float
+	The left x value of the rectangle. If no value is given, the rectangle will extend as far left as possible in the image.
+y_lo : optional, float
+	The top y value of the rectangle. If no value is given, the rectangle will extend as far up as possible in the image.
+x_hi : optional, float
+	The right x value of the rectangle. If no value is given, the rectangle will extend as far right as possible in the image.
+y_hi : optional, float
+	The bottom y value of the rectangle. If no value is given, the rectangle will extend as far down as possible in the image.
+frame : optional, np.array_like
+	The original image that the contour came from. If a value is given, a green rectangle is drawn on the screen, marking the region.
+
+Returns
+-------
+np.array_like
+	The points within the given region.
+"""
 def select(contour, x_lo=None, y_lo=None, x_hi=None, y_hi=None, frame=None):
   subset = contour
   if x_lo is not None:
@@ -110,7 +264,27 @@ def select(contour, x_lo=None, y_lo=None, x_hi=None, y_hi=None, frame=None):
     return [(-1, np.array((0, 0)))]
   return subset
 
+"""A function that draws a polygon on a frame using the given parameters
 
+Parameters
+----------
+polygon : np.array_like
+	The polygon to draw.
+frame : np.array_like
+	The frame, or image, to draw the polygon on.
+line_color : tuple(3)<int>
+	The color of the edges of the polygon.
+circle_color : optional, tuple(3)<int>
+	The color of the circle, only used if the function is drawing a circle.
+circle_radius : default=5, int
+	The radius of the circle, only used if the function is drawing a circle.
+circle_thickness : default=2, int
+	The thickness of the circle, only used if the function is drawing a circle.
+draw_index : default=False, boolean
+	...
+draw_index_scale : default=1, int
+	...
+"""
 def DrawPolygon(polygon,
                 frame,
                 line_color,
@@ -133,8 +307,39 @@ def DrawPolygon(polygon,
       cv2.putText(frame, str(i), (x1, y1), cv2.FONT_HERSHEY_SIMPLEX,
                   0.5 * draw_index_scale, (0, 0, 0))
   
+"""A function that draws the ball for our simulation
 
+Parameters
+----------
+center : np.array_like
+	The center of the ball.
+radius : float
+	The radius of the ball.
+rvec : np.array_like
+	The rotation vector of the camera (found from calibration).
+tvec : np.array_like
+	The translation vector of the camera (found from calibration).
+calib : cb.Calibration
+	The calibration object, which contains the camera matrix and distortion coefficients.
+frame : np.array_like
+	The frame to draw the ball on.
+color : tuple(3)<int>
+	The color of the ball.
+thickness : default=2, int
+	The thickness of the outline of the ball.
+"""
 def DrawProjectedSphere(center, radius, rvec, tvec, calib, frame, color, thickness=2):
+  """A function that converts world coordinates to camera coordinates.
+  
+  Parameters
+  ----------
+  point : np.array_like
+  	The point to convert.
+	
+  Returns
+  -------
+  The point in camera coordinates.
+  """
   def world2cam(point):
     T = np.squeeze(tvec)
     R, _ = cv2.Rodrigues(rvec)
@@ -183,7 +388,27 @@ def DrawProjectedSphere(center, radius, rvec, tvec, calib, frame, color, thickne
   box = cv2.fitEllipse(points)
   cv2.ellipse(frame, box, color, thickness)
 
+"""A function that draws a projected circle in the xy plane.
 
+Parameters
+----------
+center : np.array_like
+	The center of the ball.
+radius : float
+	The radius of the ball.
+rvec : np.array_like
+	The rotation vector of the camera (found from calibration).
+tvec : np.array_like
+	The translation vector of the camera (found from calibration).
+calib : cb.Calibration
+	The calibration object, which contains the camera matrix and distortion coefficients.
+frame : np.array_like
+	The frame to draw the ball on.
+color : tuple(3)<int>
+	The color of the ball.
+thickness : default=2, int
+	The thickness of the outline of the ball.
+"""
 def DrawProjectedCircleInXYPlane(center, radius, rvec, tvec, calib, frame, color, thickness=2):
   # Sample points on circle.
   npts = 12
@@ -202,7 +427,6 @@ def DrawProjectedCircleInXYPlane(center, radius, rvec, tvec, calib, frame, color
   box = cv2.fitEllipse(points)
   cv2.ellipse(frame, box, color, thickness)
   #DrawPolygon(points, frame, color)
-
 
 
 class TargetObject(object):
